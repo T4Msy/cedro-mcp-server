@@ -66,8 +66,11 @@ class TradingSessionRegistry:
         session = self._sessions.get(key)
         if session is None:
             credentials = self._provider.trading_credentials_for(principal)
+            # trading_base_url_value, NUNCA base_url direto: uma credencial de certificação
+            # contra produção (ou vice-versa) dá 401 vazio no brokerServiceLogin, sem nenhum dos
+            # padrões documentados (code 3/24) — achado real, ver config.py:trading_base_url.
             http = self._shared_http or httpx.Client(
-                base_url=self._settings.base_url, timeout=self._settings.http_timeout
+                base_url=self._settings.trading_base_url_value, timeout=self._settings.http_timeout
             )
             auth = TradingSessionAuth(
                 self._settings, credentials, remote_ip=self._settings.trading_remote_ip

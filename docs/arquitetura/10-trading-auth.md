@@ -29,16 +29,27 @@ contra a API real.
   Antes de habilitar em produção: validar contra `sso-sandbox.cedrotech.com` com uma conta
   que a Cedro confirme estar configurada para RSA.
 
-## O que nunca rodou contra a API real
+## O que já foi testado contra a API real — e o achado do host
 
-Igual ao estado documentado em `04-gap-analysis.md`/`08-plano-por-fases.md`: `TradingClient`
-tem cobertura de teste completa **com mocks** (`tests/test_trading_client.py`,
-`test_trading_tools.py`) — handshake completo, disambiguação de 401 (sessão vs. `code 24`),
-`code 3` do `brokerServiceLogin`, gate `preview→confirm`. **Nenhuma chamada real foi feita
-contra `wfcertificacao.cedrotech.com` ou produção.** `cedro-trading-smoke/` (harness C# já
-existente, dry-run por padrão) é o gate recomendado antes de expor `trading_confirm` a
-qualquer uso real — rodar esse harness contra uma conta de homologação primeiro, comparar o
-comportamento observado com o que este cliente Python assume, só então confiar no fluxo.
+Ao vivo (21/09), com credencial de **certificação** (`wfcertificacao.cedrotech.com`) enquanto o
+servidor só falava com `webfeeder.cedrotech.com` (produção): `brokerServiceLogin` devolveu
+**HTTP 401 com corpo vazio** — sem `code 3`, sem `code 24`, nenhum dos padrões documentados na
+skill. O `SignIn` (etapa 1) funcionou normalmente nesse cenário — é `brokerServiceLogin`
+especificamente que rejeita cross-host. Bate com a nota do próprio `TradingOptions.cs` da skill
+("em teste, aponte `BaseUrl` para `wfcertificacao.cedrotech.com`... nunca rode contra produção
+sem intenção") e com o padrão já documentado em `AUTENTICACAO.md` da Market Data ("autenticação
+feita num host, requisição enviada para outro").
+
+**Correção aplicada**: `Settings.trading_base_url` (env `CEDRO_TRADING_BASE_URL`), separado de
+`base_url` — quando ausente, cai no mesmo host da Market Data REST (comportamento anterior,
+preservado). `TradingSessionRegistry`/`_verify_trading_credentials` agora usam
+`settings.trading_base_url_value`, nunca `settings.base_url` direto. Configure com
+`https://wfcertificacao.cedrotech.com` sempre que a credencial de Trading for de homologação.
+
+Cobertura de teste com mocks continua completa (`tests/test_trading_client.py`,
+`test_trading_tools.py`) — handshake, disambiguação de 401 (sessão vs. `code 24`), `code 3` do
+`brokerServiceLogin`, gate `preview→confirm`. `cedro-trading-smoke/` (harness C#, dry-run por
+padrão) continua sendo o gate recomendado antes de confiar em `trading_confirm` pra valer.
 
 ## `remote_ip` e `sourceaddress`
 

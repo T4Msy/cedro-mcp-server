@@ -85,7 +85,7 @@ def _verify_trading_credentials(settings: "Settings", creds: TradingCredentials)
     não Async) — chamado direto do handler async; aceitável no volume desta rota (login pessoal,
     não um endpoint de alto tráfego).
     """
-    http = httpx.Client(base_url=settings.base_url, timeout=settings.http_timeout)
+    http = httpx.Client(base_url=settings.trading_base_url_value, timeout=settings.http_timeout)
     try:
         auth = TradingSessionAuth(settings, creds, remote_ip=settings.trading_remote_ip)
         auth.ensure(http)

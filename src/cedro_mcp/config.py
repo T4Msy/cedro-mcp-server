@@ -74,6 +74,11 @@ class Settings:
     #: Cedro usa para rastreabilidade. Sem um IP real e estável configurado, cai num placeholder
     #: óbvio (nunca "127.0.0.1", que passaria despercebido como valor real).
     trading_remote_ip: str = "0.0.0.0"
+    #: Host do Trading — SEPARADO de `base_url` de propósito. Achado real (21/09): uma credencial
+    #: de certificação (`wfcertificacao.cedrotech.com`) contra produção (`webfeeder...`) dá 401
+    #: vazio no brokerServiceLogin, sem nenhum dos padrões documentados (code 3/24) — é auth num
+    #: host, requisição noutro. `None` = usa `base_url` (mesmo host da Market Data REST).
+    trading_base_url: str | None = None
 
     # --- Auth do chamador (IAM / API key) ---
     iam_issuer: str | None = None
@@ -116,6 +121,11 @@ class Settings:
     @property
     def has_news_credentials(self) -> bool:
         return bool(self.news_client_id and self.news_client_secret)
+
+    @property
+    def trading_base_url_value(self) -> str:
+        """Host efetivo do Trading — `trading_base_url` se configurado, senão `base_url`."""
+        return self.trading_base_url or self.base_url
 
     @property
     def auth_enabled(self) -> bool:
@@ -209,6 +219,7 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         trading_jwks_url=env.get("CEDRO_TRADING_JWKS_URL") or None,
         trading_app_name=env.get("CEDRO_TRADING_APP_NAME") or "cedro-connect-ia",
         trading_remote_ip=env.get("CEDRO_TRADING_REMOTE_IP") or "0.0.0.0",
+        trading_base_url=(env.get("CEDRO_TRADING_BASE_URL") or "").rstrip("/") or None,
         iam_issuer=env.get("CEDRO_IAM_ISSUER") or None,
         iam_jwks_url=env.get("CEDRO_IAM_JWKS_URL") or None,
         iam_audience=env.get("CEDRO_IAM_AUDIENCE") or None,

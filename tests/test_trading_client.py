@@ -157,3 +157,29 @@ def test_gateway_html_error_is_not_parsed_as_json(settings: Settings) -> None:
     with as_principal("trading:trade"), pytest.raises(CedroHTTPError, match="não-JSON"):
         client.daily_orders("/services/negotiation/dailyOrder/10034/XBSP")
     client.close()
+
+
+@respx.mock
+def test_trading_client_uses_trading_base_url_when_configured(settings: Settings) -> None:
+    """Achado real (21/09): credencial de certificação contra o host de produção dá 401 vazio,
+    sem nenhum dos padrões documentados — TradingClient precisa poder falar com um host
+    diferente do da Market Data REST."""
+    cert_url = "https://wfcertificacao.cedrotech.com"
+    settings = replace(_trading_settings(settings), trading_base_url=cert_url)
+
+    prod_route = respx.post(f"{BASE_URL}/SignIn").mock(return_value=_SIGNIN_OK)
+    cert_signin = respx.post(f"{cert_url}/SignIn").mock(return_value=_SIGNIN_OK)
+    respx.get(f"{cert_url}/services/negotiation/brokerServiceLogin").mock(
+        return_value=_BROKER_LOGIN_OK
+    )
+    respx.get(f"{cert_url}/services/negotiation/dailyOrder/10034/XBSP").mock(
+        return_value=httpx.Response(200, json={"code": "0", "listBeans": []})
+    )
+
+    client = TradingClient(settings, ServiceAccountCredentialProvider(settings))
+    with as_principal("trading:trade"):
+        client.daily_orders("/services/negotiation/dailyOrder/10034/XBSP")
+    client.close()
+
+    assert cert_signin.called
+    assert not prod_route.called

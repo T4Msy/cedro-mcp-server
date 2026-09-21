@@ -56,3 +56,23 @@ def test_trading_loads_separate_signin_and_oms_credentials() -> None:
     assert settings.trading_oms_account == "146751"
     assert settings.trading_oms_login == "oms-user"
     assert settings.trading_oms_password == "oms-pass"
+
+
+def test_trading_base_url_defaults_to_base_url_when_unset() -> None:
+    settings = load_settings({"CEDRO_BASE_URL": "https://webfeeder.cedrotech.com"})
+    assert settings.trading_base_url is None
+    assert settings.trading_base_url_value == "https://webfeeder.cedrotech.com"
+
+
+def test_trading_base_url_overrides_when_set() -> None:
+    """Achado real (21/09): credencial de certificação contra o host de produção dá 401 vazio
+    no brokerServiceLogin — CEDRO_TRADING_BASE_URL deixa Trading apontar pra outro host que a
+    Market Data REST, sem afetar base_url."""
+    settings = load_settings(
+        {
+            "CEDRO_BASE_URL": "https://webfeeder.cedrotech.com",
+            "CEDRO_TRADING_BASE_URL": "https://wfcertificacao.cedrotech.com/",
+        }
+    )
+    assert settings.base_url == "https://webfeeder.cedrotech.com"
+    assert settings.trading_base_url_value == "https://wfcertificacao.cedrotech.com"
