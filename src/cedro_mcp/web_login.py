@@ -338,13 +338,15 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
             )
             try:
                 _verify_trading_credentials(self._settings, trading_creds)
-            except TokenError:
+            except TokenError as exc:
+                # Mostra o motivo real (SignIn recusado / brokerServiceLogin + code / etc.) em
+                # vez de um genérico — é exatamente o diagnóstico que TradingSessionAuth.ensure()
+                # já monta (inclusive a dica de "code 3 = user-identifier mal montado, não
+                # permissão"), perdê-lo aqui obriga a pessoa a adivinhar o que errou.
+                detail = exc.error_description or "motivo desconhecido"
                 return RedirectResponse(
                     f"/cedro-login?flow_id={flow_id}&error="
-                    + html.escape(
-                        "Login ou senha de Trading inválidos (ou conta sem permissão de "
-                        "negociação) — confira e tente de novo."
-                    ),
+                    + html.escape(f"Falha no login de Trading: {detail}"),
                     status_code=303,
                 )
             except httpx.HTTPError:
