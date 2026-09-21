@@ -1,0 +1,12 @@
+{
+  "marketCode": 1,
+  "quotesLotDefault": 100,
+  "quotesQuotationForm": 1,
+  "quotesIsinPaper": "BRPETRACNPR6",
+  "companyName": "PETROBRAS",
+  "segmentName": "Petroleo, Gas e Biocombustiveis",
+  "typeQuotesCode": 1,
+  "classificationName": "PN",
+  "quotesCurrencyDescription": "R$",
+  "securityType": "STOCK"
+}

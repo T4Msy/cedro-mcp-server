@@ -1,0 +1,18 @@
+[
+  {
+    "playerCode": "3",
+    "player": "XP INVESTIMENTOS",
+    "volumeFinancier": 125000000.0,
+    "volumeAmount": 3200000,
+    "quantityTrades": 5400,
+    "type": "STOCK"
+  },
+  {
+    "playerCode": "90",
+    "player": "BTG PACTUAL",
+    "volumeFinancier": 98000000.0,
+    "volumeAmount": 2500000,
+    "quantityTrades": 4100,
+    "type": "STOCK"
+  }
+]

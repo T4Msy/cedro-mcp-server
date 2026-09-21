@@ -1,0 +1,26 @@
+[
+  {
+    "symbol": "PETR4",
+    "price": 38.5,
+    "open": 38.2,
+    "high": 38.7,
+    "low": 38.0,
+    "previous": 38.1,
+    "quantityTrades": 1200,
+    "volumeAmount": 950000,
+    "volumeFinancier": 36575000.0,
+    "timeTrade": 202607071730
+  },
+  {
+    "symbol": "PETR4",
+    "price": 38.45,
+    "open": 38.5,
+    "high": 38.55,
+    "low": 38.4,
+    "previous": 38.5,
+    "quantityTrades": 800,
+    "volumeAmount": 500000,
+    "volumeFinancier": 19225000.0,
+    "timeTrade": 202607071731
+  }
+]

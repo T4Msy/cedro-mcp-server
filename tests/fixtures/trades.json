@@ -1,0 +1,24 @@
+[
+  {
+    "preco": "38.50",
+    "quantidade": 100,
+    "corretoraComprando": 3,
+    "corretoraVendendo": 90,
+    "bid": 38.49,
+    "ask": 38.5,
+    "indicadorNegocio": 1,
+    "date": 20260707175958,
+    "identificadorNegocio": "A1B2C3"
+  },
+  {
+    "preco": "38.49",
+    "quantidade": 200,
+    "corretoraComprando": 8,
+    "corretoraVendendo": 120,
+    "bid": 38.48,
+    "ask": 38.49,
+    "indicadorNegocio": 1,
+    "date": 20260707175959,
+    "identificadorNegocio": "A1B2C4"
+  }
+]

@@ -1,0 +1,13 @@
+{
+  "symbol": "PETR4",
+  "quoteName": "PETROBRAS PN",
+  "messageError": "",
+  "compra": [
+    { "price": 38.49, "quantity": 5000, "broker": 3 },
+    { "price": 38.48, "quantity": 12000, "broker": 8 }
+  ],
+  "venda": [
+    { "price": 38.5, "quantity": 3000, "broker": 90 },
+    { "price": 38.51, "quantity": 7500, "broker": 120 }
+  ]
+}

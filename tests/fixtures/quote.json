@@ -1,0 +1,22 @@
+[
+  {
+    "symbol": "PETR4",
+    "lastTrade": 38.5,
+    "previous": 38.1,
+    "change": 1.05,
+    "bid": 38.49,
+    "ask": 38.5,
+    "open": 38.2,
+    "high": 38.7,
+    "low": 38.0,
+    "quantityTrades": 15234,
+    "volumeAmount": 12500000,
+    "volumeFinancier": 481250000.0,
+    "average": 38.44,
+    "marketCode": 1,
+    "tickSize": 2,
+    "company": "PETROBRAS",
+    "securityType": "STOCK",
+    "timeLastTrade": "17:59:58"
+  }
+]

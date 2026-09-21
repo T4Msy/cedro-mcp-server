@@ -1,0 +1,20 @@
+[
+  {
+    "quote": "MGLU3",
+    "price": 12.4,
+    "value": 0.85,
+    "date": "2026-07-07",
+    "volfin": 45000000.0,
+    "change": 7.36,
+    "qtdeNeg": 3600000
+  },
+  {
+    "quote": "PETR4",
+    "price": 38.5,
+    "value": 0.4,
+    "date": "2026-07-07",
+    "volfin": 481250000.0,
+    "change": 1.05,
+    "qtdeNeg": 12500000
+  }
+]

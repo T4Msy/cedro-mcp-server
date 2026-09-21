@@ -1,0 +1,16 @@
+[
+  {
+    "code": "1",
+    "name": "BOVESPA",
+    "description": "Bolsa de Valores de Sao Paulo",
+    "marketDataBase": "bovespa",
+    "isPublic": "true"
+  },
+  {
+    "code": "3",
+    "name": "BMF",
+    "description": "Bolsa de Mercadorias e Futuros",
+    "marketDataBase": "bmf",
+    "isPublic": "true"
+  }
+]

@@ -1,0 +1,92 @@
+"""Entitlements: o cliente só VÊ e só EXECUTA as tools do plano que contratou."""
+
+from __future__ import annotations
+
+import asyncio
+
+import httpx
+import pytest
+import respx
+
+from cedro_mcp.auth.scopes import MARKETDATA_NEWS, MARKETDATA_READ
+from cedro_mcp.client import CedroClient
+from cedro_mcp.config import Settings
+from cedro_mcp.errors import CedroEntitlementError
+from cedro_mcp.server import build_server
+
+from ._principal import as_principal
+from .conftest import BASE_URL
+
+MARKET_TOOLS = 17
+NEWS_TOOLS = 9
+
+
+def _tool_names(mcp) -> set[str]:
+    return {t.name for t in asyncio.run(mcp.list_tools())}
+
+
+def _fns(mcp) -> dict:
+    return {t.name: t.fn for t in mcp._tool_manager.list_tools()}  # noqa: SLF001
+
+
+# ---- listagem filtrada -----------------------------------------------------
+
+
+def test_read_only_token_hides_news_tools(settings: Settings, client: CedroClient) -> None:
+    mcp = build_server(settings=settings, client=client)
+    with as_principal(MARKETDATA_READ):
+        names = _tool_names(mcp)
+    assert len(names) == MARKET_TOOLS
+    assert not any(n.startswith("news_") for n in names)
+
+
+def test_full_token_lists_all_tools(settings: Settings, client: CedroClient) -> None:
+    mcp = build_server(settings=settings, client=client)
+    with as_principal(MARKETDATA_READ, MARKETDATA_NEWS):
+        names = _tool_names(mcp)
+    assert len(names) == MARKET_TOOLS + NEWS_TOOLS
+    assert len([n for n in names if n.startswith("news_")]) == NEWS_TOOLS
+
+
+def test_no_auth_context_lists_everything(settings: Settings, client: CedroClient) -> None:
+    """Sem autenticação ativa (stdio/dev), nada é filtrado."""
+    mcp = build_server(settings=settings, client=client)
+    assert len(_tool_names(mcp)) == MARKET_TOOLS + NEWS_TOOLS
+
+
+# ---- execução negada -------------------------------------------------------
+
+
+def test_news_tool_denied_without_news_scope(settings: Settings, client: CedroClient) -> None:
+    """Esconder da listagem não basta: chamar direto também tem de ser negado."""
+    fns = _fns(build_server(settings=settings, client=client))
+    with as_principal(MARKETDATA_READ):
+        with pytest.raises(CedroEntitlementError, match="marketdata:news"):
+            fns["news_get_last"](5)
+
+
+def test_market_tool_denied_without_read_scope(settings: Settings, client: CedroClient) -> None:
+    fns = _fns(build_server(settings=settings, client=client))
+    with as_principal(MARKETDATA_NEWS):
+        with pytest.raises(CedroEntitlementError, match="marketdata:read"):
+            fns["md_list_markets"]()
+
+
+@respx.mock
+def test_tool_allowed_with_correct_scope_executes(
+    settings: Settings, client: CedroClient
+) -> None:
+    """Com o escopo certo, o decorator sai da frente e a tool executa normalmente."""
+    respx.post(f"{BASE_URL}/SignIn").mock(
+        return_value=httpx.Response(
+            200, text="true", headers={"Set-Cookie": "JSESSIONID=abc; Path=/"}
+        )
+    )
+    respx.get(f"{BASE_URL}/services/quotes/listMarket").mock(
+        return_value=httpx.Response(200, json=[{"code": "1", "name": "BOVESPA"}])
+    )
+
+    fns = _fns(build_server(settings=settings, client=client))
+    with as_principal(MARKETDATA_READ):
+        result = fns["md_list_markets"]()
+    assert [m.name for m in result] == ["BOVESPA"]

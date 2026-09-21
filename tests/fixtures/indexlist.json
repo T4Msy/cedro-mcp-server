@@ -1,0 +1,5 @@
+[
+  { "code": "IBOV", "description": "Indice Bovespa" },
+  { "code": "IBRA", "description": "Indice Brasil Amplo" },
+  { "code": "IBXL", "description": "Indice Brasil 50" }
+]

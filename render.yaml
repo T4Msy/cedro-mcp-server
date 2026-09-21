@@ -1,0 +1,40 @@
+services:
+  - name: cedro-mcp-market-data
+    type: web
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      # Credenciais REST da Cedro (downstream) — só para desenvolvimento/service-account de
+      # fallback. Em produção, a Alternativa A (credencial do próprio cliente, por requisição)
+      # substitui isto — ver docs/arquitetura/06-credential-transport.md.
+      - key: CEDRO_USER
+        sync: false
+      - key: CEDRO_PASS
+        sync: false
+      - key: CEDRO_NEWS_CLIENT_ID
+        sync: false
+      - key: CEDRO_NEWS_CLIENT_SECRET
+        sync: false
+      # Auth do chamador — ver DEPLOY-RENDER.md.
+      - key: CEDRO_IAM_ISSUER
+        value: https://cedro-market-data-mcp
+      - key: MCP_RESOURCE_URL
+        sync: false # preencher com a URL pública gerada pelo Render + "/mcp"
+      - key: CEDRO_API_KEYS
+        sync: false # <chave>:cedro-front-backend:marketdata:read|marketdata:news
+      - key: MCP_TRANSPORT
+        value: streamable-http
+      - key: MCP_HOST
+        value: "0.0.0.0"
+      # Documentação servida por cedro-docs:// — o build context deste Dockerfile é só o repo
+      # cedro-mcp-server, então a skill market-data-rest (repo irmão) NÃO está disponível na
+      # imagem por padrão. Sem CEDRO_DOCS_PATH configurado aqui, os resources cedro-docs://
+      # simplesmente não retornam nada (docs_root.is_dir() falha) — inofensivo, mas sem docs.
+      # Para servir a skill em produção: vendorizar seu conteúdo dentro deste repo (ex. em
+      # `docs/client-skill/`) e apontar CEDRO_DOCS_PATH para lá, ou montar como volume.
+      - key: CEDRO_DOCS_PATH
+        sync: false
