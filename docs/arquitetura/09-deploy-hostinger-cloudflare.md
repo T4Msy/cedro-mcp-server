@@ -38,8 +38,37 @@ projeto `cedro-mcp` com `MCP_RESOURCE_URL`/`MCP_ALLOWED_HOSTS`/`MCP_ALLOWED_ORIG
 
 ## Como redeployar o `app` (nova imagem/env, sem afetar o túnel)
 
-Chamar `VPS_createNewProjectV1` com `project_name: cedro-mcp` e o mesmo compose (services: só
-`app`, `ports: ["8000:8000"]`, `MCP_RESOURCE_URL` apontando pra URL atual do túnel).
+1. Push em `master` do repo `github.com/T4Msy/cedro-mcp-server` → `.github/workflows/
+   docker-publish.yml` builda e publica `ghcr.io/t4msy/cedro-mcp-server:latest` sozinho
+   (conferir com `gh run list --workflow=docker-publish.yml --limit 1`).
+2. Chamar `mcp__hostinger-vps__VPS_createNewProjectV1` com `virtualMachineId: 1747747`,
+   `project_name: "cedro-mcp"` e este compose (troque a URL se o túnel tiver mudado — ver
+   seção acima):
+
+```yaml
+services:
+  app:
+    image: ghcr.io/t4msy/cedro-mcp-server:latest
+    restart: unless-stopped
+    pull_policy: always
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8000"
+      MCP_WEB_LOGIN: "true"
+      MCP_RESOURCE_URL: "https://skating-committees-during-monica.trycloudflare.com/mcp"
+      MCP_ALLOWED_HOSTS: "skating-committees-during-monica.trycloudflare.com"
+      MCP_ALLOWED_ORIGINS: "https://skating-committees-during-monica.trycloudflare.com"
+    ports:
+      - "8000:8000"
+```
+
+3. Confirmar com `curl -s https://<url-do-tunel>/.well-known/oauth-authorization-server` — se
+   voltar JSON com `scopes_supported`, subiu certo.
+
+⚠️ **Todo redeploy do `app` derruba a sessão de quem já tinha logado** (credenciais em memória,
+ver `06-credential-transport.md`) — o usuário precisa reconectar/reautenticar no cliente MCP
+depois. Evite redeployar sem necessidade real enquanto alguém estiver testando ativamente.
 
 ## Ressalvas registradas (ver também `06-credential-transport.md`)
 
