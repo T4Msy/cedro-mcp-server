@@ -7,7 +7,7 @@ Entry point for the Cedro Market Data MCP server. Transporte padrão: **Streamab
 from __future__ import annotations
 
 from mcp.server.auth.provider import TokenVerifier
-from mcp.server.auth.settings import AuthSettings
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -17,10 +17,12 @@ from mcp.server.transport_security import TransportSecuritySettings
 from cedro_mcp import resources, tools
 from cedro_mcp.auth.api_key import EnvApiKeyStore
 from cedro_mcp.auth.entitlements import EntitledFastMCP
-from cedro_mcp.auth.scopes import MARKETDATA_READ
+from cedro_mcp.auth.scopes import MARKETDATA_NEWS, MARKETDATA_READ
 from cedro_mcp.auth.token_verifier import CedroTokenVerifier, build_jwks_decoder
 from cedro_mcp.client import CedroClient
 from cedro_mcp.config import ConfigurationError, Settings, load_settings
+from cedro_mcp.credentials import WebLoginCredentialProvider
+from cedro_mcp.web_login import CedroLoginProvider
 
 _INSTRUCTIONS = (
     "Tools de leitura (read-only) da API Market Data da Cedro: cotações, candles, book, "
@@ -46,6 +48,17 @@ def build_token_verifier(settings: Settings) -> TokenVerifier:
             settings.iam_jwks_url, settings.iam_issuer, settings.iam_audience
         )
     return CedroTokenVerifier(api_key_store=api_key_store, jwt_decoder=jwt_decoder)
+
+
+def _issuer_url(resource_url: str, mcp_path: str) -> str:
+    """Deriva a base pública (sem o path do MCP) a partir de ``MCP_RESOURCE_URL``.
+
+    Ex.: ``http://127.0.0.1:8000/mcp`` + ``/mcp`` → ``http://127.0.0.1:8000``. Usado como
+    ``issuer_url`` quando o próprio servidor é a autoridade OAuth (login pelo navegador) — ver
+    ``web_login.py``.
+    """
+    base = resource_url[: -len(mcp_path)] if resource_url.endswith(mcp_path) else resource_url
+    return base.rstrip("/") or resource_url
 
 
 def build_server(
@@ -80,8 +93,9 @@ def build_server(
         missing = [
             name
             for name, value in (
-                ("CEDRO_IAM_ISSUER", settings.iam_issuer),
                 ("MCP_RESOURCE_URL", settings.resource_url),
+                ("CEDRO_IAM_ISSUER (auth via IAM) OU MCP_WEB_LOGIN=true (login pelo navegador)",
+                 settings.iam_issuer or settings.web_login_enabled),
             )
             if not value
         ]
@@ -92,7 +106,14 @@ def build_server(
             "MCP_ALLOW_UNAUTHENTICATED_HTTP=true se isto for intencional (ex.: demo local)."
         )
 
-    client = client or CedroClient(settings)
+    login_provider: CedroLoginProvider | None = None
+    if settings.web_login_enabled:
+        login_provider = CedroLoginProvider(settings)
+        client = client or CedroClient(
+            settings, credential_provider=WebLoginCredentialProvider(login_provider)
+        )
+    else:
+        client = client or CedroClient(settings)
 
     kwargs: dict = {
         "instructions": _INSTRUCTIONS,
@@ -111,7 +132,20 @@ def build_server(
             allowed_origins=list(settings.allowed_origins),
         )
 
-    if settings.auth_enabled:
+    if login_provider is not None:
+        # O próprio MCP é a autoridade OAuth (login pelo navegador) — nada de IAM externo.
+        kwargs["auth_server_provider"] = login_provider
+        kwargs["auth"] = AuthSettings(
+            issuer_url=_issuer_url(settings.resource_url, settings.mcp_path),
+            resource_server_url=settings.resource_url,
+            required_scopes=[MARKETDATA_READ],
+            client_registration_options=ClientRegistrationOptions(
+                enabled=True,
+                valid_scopes=[MARKETDATA_READ, MARKETDATA_NEWS],
+                default_scopes=[MARKETDATA_READ, MARKETDATA_NEWS],
+            ),
+        )
+    elif settings.auth_enabled:
         kwargs["token_verifier"] = token_verifier or build_token_verifier(settings)
         kwargs["auth"] = AuthSettings(
             issuer_url=settings.iam_issuer,
@@ -124,6 +158,13 @@ def build_server(
 
     tools.register_all(mcp, client)
     resources.register(mcp, settings)
+
+    if login_provider is not None:
+        # Ponto de integração lido por http_app.create_app() pra montar /cedro-login no mesmo
+        # app ASGI — não é um atributo do FastMCP em si, só carona pra não precisar mudar a
+        # assinatura de build_server() em todo lugar que já a chama.
+        mcp.cedro_login_provider = login_provider  # type: ignore[attr-defined]
+
     return mcp
 
 

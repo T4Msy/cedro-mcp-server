@@ -11,11 +11,15 @@ certo). Por isso isto é uma **interface**: quando a resposta vier, troca-se só
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from mcp.server.auth.provider import AccessToken
 
 from .config import Settings
+from .errors import CedroAuthError
+
+if TYPE_CHECKING:
+    from .web_login import CedroLoginProvider
 
 
 @dataclass(frozen=True)
@@ -78,3 +82,31 @@ class PerUserCredentialProvider:
         if principal is None or not principal.subject:
             raise NotImplementedError("Principal sem `subject` não pode ter sessão dedicada.")
         return principal.subject
+
+
+class WebLoginCredentialProvider:
+    """Credencial resolvida a partir do login feito no navegador (``web_login.py``).
+
+    ``principal`` aqui é o ``AccessToken`` emitido pelo :class:`~cedro_mcp.web_login.
+    CedroLoginProvider` — o mesmo token que autenticou o chamador do MCP também é a chave pra
+    achar a credencial Market Data associada a ele. Uma credencial por token ⇒ uma sessão
+    `JSESSIONID` por token (via `SessionRegistry`), nunca compartilhada entre clientes.
+    """
+
+    def __init__(self, login_provider: "CedroLoginProvider") -> None:
+        self._login_provider = login_provider
+
+    def credentials_for(self, principal: AccessToken | None) -> RestCredentials:
+        if principal is None:
+            raise CedroAuthError("Não autenticado — faça login em /cedro-login primeiro.")
+        creds = self._login_provider.credentials_by_token.get(principal.token)
+        if creds is None:
+            raise CedroAuthError(
+                "Sessão de login não encontrada ou expirada — refaça o login pelo navegador."
+            )
+        return creds
+
+    def session_key(self, principal: AccessToken | None) -> str:
+        if principal is None:
+            raise CedroAuthError("Não autenticado — faça login em /cedro-login primeiro.")
+        return principal.token

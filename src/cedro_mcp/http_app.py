@@ -102,7 +102,17 @@ class RateLimitMiddleware:
 
 def create_app(mcp: FastMCP, *, rate_limit: int = 0, rate_window: float = 60.0) -> ASGIApp:
     """Monta o app ASGI do MCP (Streamable HTTP), opcionalmente com rate limit."""
-    app: ASGIApp | Starlette = mcp.streamable_http_app()
+    http_app: Starlette = mcp.streamable_http_app()
+
+    # Login pelo navegador (ver server.build_server() + web_login.py): as rotas /cedro-login
+    # precisam viver no MESMO app Starlette que /authorize, /token etc. (montados pelo FastMCP
+    # só quando auth_server_provider está setado), senão o redirect de authorize() pra
+    # /cedro-login cairia em 404.
+    login_provider = getattr(mcp, "cedro_login_provider", None)
+    if login_provider is not None:
+        http_app.router.routes.extend(login_provider.routes())
+
+    app: ASGIApp = http_app
     if rate_limit > 0:
         app = RateLimitMiddleware(app, limit=rate_limit, window=rate_window)
     return app

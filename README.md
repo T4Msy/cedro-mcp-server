@@ -74,6 +74,23 @@ mcp dev src/cedro_mcp/server.py   # Inspector (requer Node/npx)
 > Sem `CEDRO_IAM_ISSUER` + `MCP_RESOURCE_URL`, o servidor sobe **sem autenticação** e expõe todas as
 > tools. Use apenas em dev local.
 
+### Login pelo navegador (`MCP_WEB_LOGIN=true`)
+
+Alternativa ao IAM/API key acima, pra quando não há IAM da Cedro configurado ainda: com
+`MCP_WEB_LOGIN=true`, o próprio MCP vira a autoridade OAuth. O cliente MCP (Claude Desktop,
+claude.ai, etc.) abre uma aba pedindo **login e senha da Market Data REST**, o servidor confirma
+contra o `SignIn` real da Cedro, e devolve um token — sem copiar/colar nada, sem senha em arquivo
+de config. Implementação em `src/cedro_mcp/web_login.py`; decisão registrada em
+`docs/arquitetura/06-credential-transport.md`.
+
+```powershell
+$env:MCP_WEB_LOGIN="true"; python -m cedro_mcp.server
+```
+
+> ⚠️ A credencial fica em **memória do processo** enquanto o token for válido (30 dias, sem
+> refresh — expira, reloga pela aba). Nunca em disco, nunca persistida — mas é mais exposição do
+> que o header por requisição puro. Reiniciar o processo desloga todo mundo.
+
 ## ⚠️ Notas de produção
 
 1. **Anti-DNS-rebinding:** o FastMCP só liga essa proteção sozinho quando o host é

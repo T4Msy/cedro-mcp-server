@@ -59,6 +59,10 @@ class Settings:
     #: `MCP_RESOURCE_URL` rodando em streamable-http falha no startup em vez de expor as tools
     #: silenciosamente sem autenticação.
     allow_unauthenticated_http: bool = False
+    #: Login pelo navegador (ver web_login.py): o MCP vira sua própria autorização OAuth, cujo
+    #: passo de "autorização" é o SignIn real na Market Data REST. Alternativa ao IAM/API key
+    #: acima — mutuamente exclusiva com elas na prática (`build_server` escolhe uma ou outra).
+    web_login_enabled: bool = False
 
     # --- Proteção anti-DNS-rebinding (Host/Origin) ---
     # ⚠️ O FastMCP só liga essa proteção sozinho quando o host é local (127.0.0.1/localhost/::1).
@@ -81,8 +85,10 @@ class Settings:
 
     @property
     def auth_enabled(self) -> bool:
-        """Auth do chamador só liga com issuer + URL pública (exigidos pelo ``AuthSettings``)."""
-        return bool(self.iam_issuer and self.resource_url)
+        """Auth do chamador liga com IAM+URL pública, OU com login pelo navegador ligado."""
+        return bool(self.iam_issuer and self.resource_url) or (
+            self.web_login_enabled and bool(self.resource_url)
+        )
 
     @property
     def dns_rebinding_protection_enabled(self) -> bool:
@@ -127,7 +133,9 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
 
         load_dotenv()
     env = environ if environ is not None else dict(os.environ)
-    docs_raw = env.get("CEDRO_DOCS_PATH", DEFAULT_DOCS_PATH)
+    # `or`, não `.get(..., default)`: uma linha `CEDRO_DOCS_PATH=` vazia no .env é uma string
+    # vazia presente no ambiente, não uma chave ausente — `.get` com default não pegaria isso.
+    docs_raw = env.get("CEDRO_DOCS_PATH") or DEFAULT_DOCS_PATH
     return Settings(
         base_url=env.get("CEDRO_BASE_URL", DEFAULT_BASE_URL).rstrip("/"),
         user=env.get("CEDRO_USER") or None,
@@ -146,6 +154,7 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         mcp_path=env.get("MCP_PATH", "/mcp"),
         resource_url=env.get("MCP_RESOURCE_URL") or None,
         allow_unauthenticated_http=_bool(env.get("MCP_ALLOW_UNAUTHENTICATED_HTTP")),
+        web_login_enabled=_bool(env.get("MCP_WEB_LOGIN")),
         allowed_hosts=_csv(env.get("MCP_ALLOWED_HOSTS")),
         allowed_origins=_csv(env.get("MCP_ALLOWED_ORIGINS")),
         rate_limit=int(env.get("MCP_RATE_LIMIT", "0")),

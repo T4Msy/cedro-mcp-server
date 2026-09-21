@@ -46,3 +46,28 @@ Advisor MCP já registrou sobre elicitation).
 6. **`stateless_http` revisto.** O servidor hoje assume ausência de estado entre requisições
    (`server.py`); sessão de credencial por cliente é estado. Precisa de decisão explícita sobre como
    isso convive com Streamable HTTP stateless — não é assumido como resolvido por este dossiê.
+
+## Atualização — C implementada a pedido explícito do usuário (`MCP_WEB_LOGIN`)
+
+A recomendação acima (A como base, B como evolução) foi mantida como o caminho **recomendado**
+para produção remota multi-cliente. Ainda assim, o usuário pediu explicitamente a UX de "clicar em
+autenticar, abrir uma aba, logar e pronto" — que é a Alternativa C — e pediu para implementá-la
+mesmo depois de eu (Claude) apontar o trade-off. Está implementada em `src/cedro_mcp/web_login.py`,
+ativada por `MCP_WEB_LOGIN=true`, com escopo deliberadamente restrito:
+
+- O servidor age como sua própria autoridade OAuth (`OAuthAuthorizationServerProvider`); a "página
+  de terceiro" do fluxo OAuth padrão **é** nosso próprio formulário de login, que verifica a
+  credencial contra o `SignIn` real da Cedro antes de emitir qualquer token.
+- A credencial fica em memória **do processo**, associada ao token emitido, nunca em disco —
+  **não** é o vault permanente que a nota do Advisor MCP rejeitou; é mais próximo de uma sessão
+  longa do que de uma base de senhas. Reiniciar o processo desloga todos os clientes.
+- Sem refresh token nesta v1: o access token dura 30 dias; expirando, o usuário reabre a aba.
+- Continua valendo o resto desta seção: sessão `JSESSIONID` por token (via `SessionRegistry`,
+  já reaproveitado sem mudança), limitador de `SignIn` ainda **não** implementado (item 4 acima
+  segue pendente também para este modo).
+
+**Risco que este modo aceita conscientemente, registrado para a conversa com Saulo/Adriel antes de
+usar isso em produção real:** o processo do servidor passa a deter, em memória, a credencial de
+todo cliente conectado. Aceitável para desenvolvimento/demo/uso pessoal (o caso de uso que motivou
+o pedido); para produção multi-cliente exposta publicamente, a Alternativa A continua sendo a
+recomendação técnica deste dossiê.
