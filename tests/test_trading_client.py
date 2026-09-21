@@ -80,6 +80,21 @@ def test_broker_login_code_3_raises_with_hint(settings: Settings) -> None:
 
 
 @respx.mock
+def test_broker_login_401_includes_body_and_provisioning_hint(settings: Settings) -> None:
+    """Achado real (21/09): brokerServiceLogin pode devolver 401 puro (não o padrão code 3/
+    code 24 documentado) — SignIn já funcionou nesse ponto, então a mensagem precisa dizer isso
+    e mostrar o corpo da resposta, em vez de só "HTTP 401" sem contexto."""
+    respx.post(f"{BASE_URL}/SignIn").mock(return_value=_SIGNIN_OK)
+    respx.get(f"{BASE_URL}/services/negotiation/brokerServiceLogin").mock(
+        return_value=httpx.Response(401, text='{"error":"não autorizado"}')
+    )
+    client = TradingClient(_trading_settings(settings), ServiceAccountCredentialProvider(_trading_settings(settings)))
+    with as_principal("trading:trade"), pytest.raises(CedroAuthError, match="não autorizado"):
+        client.daily_orders("/services/negotiation/dailyOrder/10034/XBSP")
+    client.close()
+
+
+@respx.mock
 def test_401_on_order_send_hints_at_account_permission_not_session(settings: Settings) -> None:
     respx.post(f"{BASE_URL}/SignIn").mock(return_value=_SIGNIN_OK)
     respx.get(f"{BASE_URL}/services/negotiation/brokerServiceLogin").mock(

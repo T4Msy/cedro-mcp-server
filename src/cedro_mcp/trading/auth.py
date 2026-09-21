@@ -91,7 +91,26 @@ class TradingSessionAuth:
             headers=self.identifier_header(),
         )
         if resp.status_code != 200:
-            raise CedroAuthError(f"brokerServiceLogin falhou (HTTP {resp.status_code}).")
+            body_snippet = (resp.text or "")[:300]
+            hint = ""
+            if resp.status_code == 401:
+                # Diferente do 401 documentado em sendNewOrderSingle* (code 24 = conta sem
+                # permissão de ENVIAR ordem, com brokerServiceLogin já OK antes) — isto é 401
+                # no próprio brokerServiceLogin, mais cedo no fluxo. O SignIn logo acima já
+                # funcionou (senão teríamos parado ali), então a causa mais provável é a conta
+                # não ter NENHUMA associação com o OMS/negociação (provisionamento do lado da
+                # Cedro), não um erro de código daqui — mas não está documentado com a mesma
+                # certeza do code 24, então fica como hipótese, não fato confirmado.
+                hint = (
+                    " (SignIn funcionou, então provavelmente não é sessão — hipótese mais "
+                    "provável é a conta não ter nenhuma associação com o OMS/negociação, "
+                    "provisionamento do lado da Cedro; não confirmado na documentação da skill "
+                    "para este endpoint especificamente, então vale perguntar à comercial)"
+                )
+            message = f"brokerServiceLogin falhou (HTTP {resp.status_code}){hint}."
+            if body_snippet:
+                message += f" Corpo: {body_snippet!r}"
+            raise CedroAuthError(message)
         try:
             payload = resp.json()
         except ValueError as exc:
