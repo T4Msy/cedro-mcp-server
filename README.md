@@ -1,11 +1,17 @@
-# Cedro MCP Server — Market Data
+# Cedro MCP Server — rumo ao "Cedro Connect IA"
 
-Servidor **MCP** que expõe a API **Market Data** da Cedro como *tools* de leitura pura para IAs.
-Segue o modelo **1 MCP por produto** decidido em reunião: este servidor cobre **apenas** Market Data.
+Servidor **MCP** que expõe as APIs da Cedro como *tools* para IAs. Cobria só Market Data REST
+(read-only); agora também cobre **Trading** (envio/edição/cancelamento de ordem, sempre atrás de
+confirmação humana em duas etapas). **Market Data Socket** (streaming) é a próxima fase. O nome e
+a instrução do servidor ainda dizem "cedro-market-data" — o rename pra "Cedro Connect IA" é a
+última etapa do roadmap (`docs/arquitetura/08-plano-por-fases.md`, Fase 4), não afeta
+funcionalidade.
 
-> **Status:** construído e testado com **mocks/fixtures** (68 testes). Ainda **não validado contra a
-> API real da Cedro** — falta credencial de sandbox. Ver `scripts/smoke_live.py`. Arquitetura e
-> decisões comerciais documentadas em `docs/arquitetura/`.
+> **Status:** construído e testado com **mocks/fixtures** (132 testes). Market Data REST está em
+> produção pessoal (deploy real, ver `docs/arquitetura/09-deploy-hostinger-cloudflare.md`).
+> Trading tem cobertura de teste completa mas **nunca rodou contra a API real** — ver
+> `docs/arquitetura/10-trading-auth.md` antes de usar `trading_confirm` com dinheiro de verdade.
+> Arquitetura e decisões comerciais documentadas em `docs/arquitetura/`.
 
 ## Arquitetura
 
@@ -32,7 +38,9 @@ Segue o modelo **1 MCP por produto** decidido em reunião: este servidor cobre *
 `marketdata:read` é exigido para conectar ao servidor. Nomes **provisórios** até a Cedro confirmar os
 `roles`/`claims` reais do IAM — o único ponto de verdade é `src/cedro_mcp/auth/scopes.py`.
 
-## Tools (26)
+## Tools
+
+### Market Data REST (26, read-only)
 
 | Grupo | Tools |
 |---|---|
@@ -45,6 +53,19 @@ Segue o modelo **1 MCP por produto** decidido em reunião: este servidor cobre *
 
 A documentação pública da skill `market-data-rest` também é exposta como **resources**
 `cedro-docs://index` e `cedro-docs://note/{token}` (nunca o vault interno).
+
+### Trading (6 — leitura + ação real com confirmação)
+
+| Grupo | Tools |
+|---|---|
+| Consulta (leitura) | `trading_list_orders_today`, `trading_get_order_history` |
+| Ação real — **preview → confirm** | `trading_preview_order` (8 tipos, incl. condicionais nativas Start/Stop/StopConditional/StopMoving/StopOCO/StopSimult), `trading_preview_cancel_order`, `trading_preview_edit_order`, `trading_confirm` |
+
+Toda tool de escrita monta e valida a ordem sem enviar nada (`trading_preview_*`), devolve um
+resumo + `confirmation_token`, e só executa depois de `trading_confirm(token)` — nunca dispara
+sozinha a partir de um evento. Token de uso único, expira em ~2 min. Credencial de Trading é
+**separada** da Market Data (seção opcional no formulário `/cedro-login`, ou
+`CEDRO_TRADING_USER`/`CEDRO_TRADING_PASS` em dev). Ver `docs/arquitetura/10-trading-auth.md`.
 
 ## Instalação
 

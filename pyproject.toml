@@ -14,6 +14,9 @@ dependencies = [
     "uvicorn>=0.30",
     "pyjwt[crypto]>=2.8",
     "python-dotenv>=1.0",
+    # RSA-OAEP-SHA256 do user-identifier de Trading (trading/identity.py). Já vinha transitivo
+    # via pyjwt[crypto], mas dependência transitiva não é garantia de versão — explícita aqui.
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]

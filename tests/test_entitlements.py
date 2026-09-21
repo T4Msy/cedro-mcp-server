@@ -19,6 +19,9 @@ from .conftest import BASE_URL
 
 MARKET_TOOLS = 17
 NEWS_TOOLS = 9
+#: 2 leitura (trading_list_orders_today, trading_get_order_history) + 4 escrita
+#: (preview_order, preview_cancel_order, preview_edit_order, confirm).
+TRADING_TOOLS = 6
 
 
 def _tool_names(mcp) -> set[str]:
@@ -51,7 +54,7 @@ def test_full_token_lists_all_tools(settings: Settings, client: CedroClient) -> 
 def test_no_auth_context_lists_everything(settings: Settings, client: CedroClient) -> None:
     """Sem autenticação ativa (stdio/dev), nada é filtrado."""
     mcp = build_server(settings=settings, client=client)
-    assert len(_tool_names(mcp)) == MARKET_TOOLS + NEWS_TOOLS
+    assert len(_tool_names(mcp)) == MARKET_TOOLS + NEWS_TOOLS + TRADING_TOOLS
 
 
 # ---- execução negada -------------------------------------------------------

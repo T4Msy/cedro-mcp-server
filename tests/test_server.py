@@ -57,9 +57,11 @@ def test_all_expected_tools_registered(settings: Settings, client: CedroClient) 
 def test_tool_count_matches_blueprint_scope(settings: Settings, client: CedroClient) -> None:
     mcp = _server(settings, client)
     names = {t.name for t in asyncio.run(mcp.list_tools())}
-    # F1: 17 tools de cotações/candles/book/negócios/rankings + 9 de notícias.
-    assert len([n for n in names if not n.startswith("news_")]) == 17
+    # F1: 17 tools de cotações/candles/book/negócios/rankings + 9 de notícias + 6 de Trading
+    # (Fase 1 do roadmap "Cedro Connect IA").
+    assert len([n for n in names if n.startswith("md_")]) == 17
     assert len([n for n in names if n.startswith("news_")]) == 9
+    assert len([n for n in names if n.startswith("trading_")]) == 6
 
 
 def test_docs_resources_registered(settings: Settings, client: CedroClient) -> None:

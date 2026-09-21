@@ -46,6 +46,17 @@ class Settings:
     socket_password: str | None = None
     trading_user: str | None = None
     trading_password: str | None = None
+    #: BASE64 é o default confirmado em campo; "rsa" nunca foi confirmado ao vivo — ver
+    #: trading/identity.py e docs/arquitetura/10-trading-auth.md.
+    trading_encryption: str = "base64"
+    #: Só exigido quando trading_encryption == "rsa".
+    trading_jwks_url: str | None = None
+    #: Nome da aplicação enviado em `brokerServiceLogin` (`appname`) e nas ordens.
+    trading_app_name: str = "cedro-connect-ia"
+    #: IP de origem enviado em `user-identifier.remote_ip` e `sourceaddress` das ordens — a
+    #: Cedro usa para rastreabilidade. Sem um IP real e estável configurado, cai num placeholder
+    #: óbvio (nunca "127.0.0.1", que passaria despercebido como valor real).
+    trading_remote_ip: str = "0.0.0.0"
 
     # --- Auth do chamador (IAM / API key) ---
     iam_issuer: str | None = None
@@ -127,6 +138,19 @@ def _normalize_transport(raw: str | None) -> str:
     return value
 
 
+_SUPPORTED_TRADING_ENCRYPTIONS = ("base64", "rsa")
+
+
+def _normalize_trading_encryption(raw: str | None) -> str:
+    value = (raw or "base64").strip().lower()
+    if value not in _SUPPORTED_TRADING_ENCRYPTIONS:
+        raise ConfigurationError(
+            f"CEDRO_TRADING_ENCRYPTION={value!r} não é suportado. Use um de "
+            f"{_SUPPORTED_TRADING_ENCRYPTIONS}."
+        )
+    return value
+
+
 def load_settings(environ: dict[str, str] | None = None) -> Settings:
     """Carrega Settings do ambiente (ou de um dict, para testes).
 
@@ -154,6 +178,10 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         socket_password=env.get("CEDRO_SOCKET_PASS") or None,
         trading_user=env.get("CEDRO_TRADING_USER") or None,
         trading_password=env.get("CEDRO_TRADING_PASS") or None,
+        trading_encryption=_normalize_trading_encryption(env.get("CEDRO_TRADING_ENCRYPTION")),
+        trading_jwks_url=env.get("CEDRO_TRADING_JWKS_URL") or None,
+        trading_app_name=env.get("CEDRO_TRADING_APP_NAME") or "cedro-connect-ia",
+        trading_remote_ip=env.get("CEDRO_TRADING_REMOTE_IP") or "0.0.0.0",
         iam_issuer=env.get("CEDRO_IAM_ISSUER") or None,
         iam_jwks_url=env.get("CEDRO_IAM_JWKS_URL") or None,
         iam_audience=env.get("CEDRO_IAM_AUDIENCE") or None,

@@ -17,11 +17,21 @@ from mcp.server.transport_security import TransportSecuritySettings
 from cedro_mcp import resources, tools
 from cedro_mcp.auth.api_key import EnvApiKeyStore
 from cedro_mcp.auth.entitlements import EntitledFastMCP
-from cedro_mcp.auth.scopes import MARKETDATA_NEWS, MARKETDATA_READ
+from cedro_mcp.auth.scopes import (
+    MARKETDATA_NEWS,
+    MARKETDATA_READ,
+    MARKETDATA_STREAM,
+    TRADING_READ,
+    TRADING_TRADE,
+    TRADING_TRIGGER,
+)
 from cedro_mcp.auth.token_verifier import CedroTokenVerifier, build_jwks_decoder
 from cedro_mcp.client import CedroClient
 from cedro_mcp.config import ConfigurationError, Settings, load_settings
-from cedro_mcp.credentials import WebLoginCredentialProvider
+from cedro_mcp.credentials import CredentialProvider, ServiceAccountCredentialProvider, WebLoginCredentialProvider
+from cedro_mcp.tools import trading as tools_trading
+from cedro_mcp.trading.client import TradingClient
+from cedro_mcp.trading.confirmation import ConfirmationStore
 from cedro_mcp.web_login import CedroLoginProvider
 
 _INSTRUCTIONS = (
@@ -107,13 +117,16 @@ def build_server(
         )
 
     login_provider: CedroLoginProvider | None = None
+    credential_provider: CredentialProvider
     if settings.web_login_enabled:
         login_provider = CedroLoginProvider(settings)
-        client = client or CedroClient(
-            settings, credential_provider=WebLoginCredentialProvider(login_provider)
-        )
+        credential_provider = WebLoginCredentialProvider(login_provider)
     else:
-        client = client or CedroClient(settings)
+        credential_provider = ServiceAccountCredentialProvider(settings)
+
+    client = client or CedroClient(settings, credential_provider=credential_provider)
+    trading_client = TradingClient(settings, credential_provider)
+    confirmation_store = ConfirmationStore()
 
     kwargs: dict = {
         "instructions": _INSTRUCTIONS,
@@ -141,7 +154,20 @@ def build_server(
             required_scopes=[MARKETDATA_READ],
             client_registration_options=ClientRegistrationOptions(
                 enabled=True,
-                valid_scopes=[MARKETDATA_READ, MARKETDATA_NEWS],
+                # trading:*/marketdata:stream ficam de fora do default de propósito — nunca
+                # concedidos automaticamente a um client que só se registrou (DCR). Um client
+                # pode pedir explicitamente no /authorize, mas o gate real de segurança é outro:
+                # nenhuma tool de Trading executa sem credencial de verdade no bundle (ver
+                # credentials.py::WebLoginCredentialProvider.trading_credentials_for), scope é
+                # só a primeira camada.
+                valid_scopes=[
+                    MARKETDATA_READ,
+                    MARKETDATA_NEWS,
+                    MARKETDATA_STREAM,
+                    TRADING_READ,
+                    TRADING_TRADE,
+                    TRADING_TRIGGER,
+                ],
                 default_scopes=[MARKETDATA_READ, MARKETDATA_NEWS],
             ),
         )
@@ -157,6 +183,7 @@ def build_server(
     mcp = EntitledFastMCP("cedro-market-data", **kwargs)
 
     tools.register_all(mcp, client)
+    tools_trading.register(mcp, trading_client, confirmation_store, credential_provider, settings)
     resources.register(mcp, settings)
 
     if login_provider is not None:

@@ -40,7 +40,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from .credentials import CedroCredentialBundle, RestCredentials
+from .credentials import CedroCredentialBundle, RestCredentials, TradingCredentials
+from .errors import CedroAuthError
+from .trading.auth import TradingSessionAuth
 
 if TYPE_CHECKING:
     from .config import Settings
@@ -77,6 +79,22 @@ async def _verify_rest_credentials(settings: "Settings", creds: RestCredentials)
         raise TokenError("access_denied", "Login ou senha da Market Data inválidos.")
 
 
+def _verify_trading_credentials(settings: "Settings", creds: TradingCredentials) -> None:
+    """``SignIn`` + ``brokerServiceLogin`` reais (as 3 camadas de auth) — só pra validar, a
+    sessão é descartada em seguida. Síncrono (``TradingSessionAuth.ensure`` usa ``httpx.Client``,
+    não Async) — chamado direto do handler async; aceitável no volume desta rota (login pessoal,
+    não um endpoint de alto tráfego).
+    """
+    http = httpx.Client(base_url=settings.base_url, timeout=settings.http_timeout)
+    try:
+        auth = TradingSessionAuth(settings, creds, remote_ip=settings.trading_remote_ip)
+        auth.ensure(http)
+    except CedroAuthError as exc:
+        raise TokenError("access_denied", str(exc)) from exc
+    finally:
+        http.close()
+
+
 class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken]):
     """Ver docstring do módulo. Todo o estado é em memória, por processo."""
 
@@ -85,9 +103,8 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         self._clients: dict[str, OAuthClientInformationFull] = {}
         self._flows: dict[str, _PendingFlow] = {}
         self._auth_codes: dict[str, AuthorizationCode] = {}
-        #: token de autorização → bundle (pode conter REST, Socket e/ou Trading — ver
-        #: credentials.py). Hoje o formulário só coleta REST; Socket/Trading entram quando os
-        #: respectivos clientes existirem (Fases 1 e 2 do dossiê de arquitetura).
+        #: token de autorização → bundle (REST + Trading opcional hoje; Socket entra quando o
+        #: cliente existir — Fase 2 do dossiê de arquitetura, `08-plano-por-fases.md`).
         self._pending_credentials: dict[str, CedroCredentialBundle] = {}
         self._access_tokens: dict[str, AccessToken] = {}
         #: Único estado que o resto do servidor lê (`credentials.py`) — token → bundle.
@@ -204,6 +221,8 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         flow_id = str(form.get("flow_id", ""))
         login = str(form.get("login", "")).strip()
         password = str(form.get("password", ""))
+        trading_login = str(form.get("trading_login", "")).strip()
+        trading_password = str(form.get("trading_password", ""))
 
         flow = self._flows.get(flow_id)
         if flow is None:
@@ -212,7 +231,15 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         if not login or not password:
             return RedirectResponse(
                 f"/cedro-login?flow_id={flow_id}&error="
-                + html.escape("Preencha login e senha."),
+                + html.escape("Preencha login e senha da Market Data."),
+                status_code=303,
+            )
+        # Trading é opcional, mas os dois campos juntos ou nenhum — meio preenchido é erro do
+        # usuário (esqueceu um campo), não "quero pular Trading".
+        if bool(trading_login) != bool(trading_password):
+            return RedirectResponse(
+                f"/cedro-login?flow_id={flow_id}&error="
+                + html.escape("Preencha login E senha de Trading, ou deixe os dois em branco."),
                 status_code=303,
             )
 
@@ -222,7 +249,7 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         except TokenError:
             return RedirectResponse(
                 f"/cedro-login?flow_id={flow_id}&error="
-                + html.escape("Login ou senha inválidos — confira e tente de novo."),
+                + html.escape("Login ou senha da Market Data inválidos — confira e tente de novo."),
                 status_code=303,
             )
         except httpx.HTTPError:
@@ -231,6 +258,27 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
                 + html.escape("Não consegui falar com a Market Data agora. Tente de novo."),
                 status_code=303,
             )
+
+        trading_creds: TradingCredentials | None = None
+        if trading_login and trading_password:
+            trading_creds = TradingCredentials(user=trading_login, password=trading_password)
+            try:
+                _verify_trading_credentials(self._settings, trading_creds)
+            except TokenError:
+                return RedirectResponse(
+                    f"/cedro-login?flow_id={flow_id}&error="
+                    + html.escape(
+                        "Login ou senha de Trading inválidos (ou conta sem permissão de "
+                        "negociação) — confira e tente de novo."
+                    ),
+                    status_code=303,
+                )
+            except httpx.HTTPError:
+                return RedirectResponse(
+                    f"/cedro-login?flow_id={flow_id}&error="
+                    + html.escape("Não consegui falar com o Trading agora. Tente de novo."),
+                    status_code=303,
+                )
 
         del self._flows[flow_id]
         code = secrets.token_urlsafe(32)
@@ -245,7 +293,7 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
             resource=flow.params.resource,
             subject=login,
         )
-        self._pending_credentials[code] = CedroCredentialBundle(rest=creds)
+        self._pending_credentials[code] = CedroCredentialBundle(rest=creds, trading=trading_creds)
         redirect_url = construct_redirect_uri(
             str(flow.params.redirect_uri), code=code, state=flow.params.state
         )
@@ -287,22 +335,35 @@ def _page(title: str, body: str) -> str:
 def _render_login_page(flow_id: str, error: str | None) -> str:
     error_html = f'<div class="error">{html.escape(error)}</div>' if error else ""
     body = f"""
-<h1>Cedro Market Data MCP</h1>
+<h1>Cedro Connect IA</h1>
 <p class="sub">Entre com a credencial que você já usa na Market Data REST.</p>
 {error_html}
 <form method="post" action="/cedro-login">
   <input type="hidden" name="flow_id" value="{html.escape(flow_id)}">
-  <label for="login">Login</label>
+  <label for="login">Login (Market Data)</label>
   <input id="login" name="login" type="text" autocomplete="username" autofocus required>
-  <label for="password">Senha</label>
+  <label for="password">Senha (Market Data)</label>
   <input id="password" name="password" type="password" autocomplete="current-password" required>
+
+  <details style="margin-top: 20px;">
+    <summary style="cursor: pointer; color: #c9d1d9; font-size: 0.9rem;">
+      Também operar (Trading) — opcional
+    </summary>
+    <p class="hint" style="margin-top: 10px;">Conta OMS separada da Market Data — deixe em
+    branco se você só quer consultar dados, sem enviar ordem.</p>
+    <label for="trading_login">Login (Trading)</label>
+    <input id="trading_login" name="trading_login" type="text" autocomplete="off">
+    <label for="trading_password">Senha (Trading)</label>
+    <input id="trading_password" name="trading_password" type="password" autocomplete="off">
+  </details>
+
   <button type="submit">Autenticar</button>
 </form>
 <p class="hint">Sua senha é enviada direto pra Cedro pra confirmar o login (o mesmo SignIn que a
 Market Data REST já usa) e nunca é salva em disco. Depois de autenticar, esta aba fecha sozinha
 e volta pro seu app de IA.</p>
 """
-    return _page("Entrar — Cedro Market Data MCP", body)
+    return _page("Entrar — Cedro Connect IA", body)
 
 
 def _render_expired_page() -> str:

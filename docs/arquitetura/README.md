@@ -12,6 +12,7 @@ Ler nesta ordem:
 8. [Tools — consolidação (futuro)](07-tools-consolidation.md)
 9. [Plano por fases](08-plano-por-fases.md)
 10. [Deploy ativo — Hostinger VPS + Cloudflare Tunnel](09-deploy-hostinger-cloudflare.md)
+11. [Trading — autenticação e status de validação](10-trading-auth.md)
 
 Produzido junto com o saneamento do repositório (ver `README.md` na raiz e
 `docs/estado-atual-mcp-market-data.md`) — sem features novas, sobre o código como ele está hoje.
