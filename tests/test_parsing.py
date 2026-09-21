@@ -43,6 +43,24 @@ def test_md_get_quote(tool_fns: dict) -> None:
 
 
 @respx.mock
+def test_md_get_quote_accepts_a_bare_symbol_not_just_a_list(
+    settings: Settings, client: CedroClient
+) -> None:
+    """Chamador de LLM erra fácil mandando `symbols: "PETR4"` em vez de uma lista de 1 — a
+    tool precisa tolerar isso na validação real do MCP (via call_tool), não só quando chamada
+    direto como função Python (onde o BeforeValidator não entra em ação)."""
+    import asyncio
+
+    respx.post(f"{BASE_URL}/SignIn").mock(return_value=_SIGNIN_OK)
+    respx.get(f"{BASE_URL}/services/quotes/quote/PETR4").mock(
+        return_value=httpx.Response(200, json=load_fixture("quote.json"))
+    )
+    mcp = build_server(settings=settings, client=client)
+    content = asyncio.run(mcp.call_tool("md_get_quote", {"symbols": "PETR4"}))
+    assert "PETR4" in str(content)
+
+
+@respx.mock
 def test_md_get_quote_info(tool_fns: dict) -> None:
     respx.post(f"{BASE_URL}/SignIn").mock(return_value=_SIGNIN_OK)
     route = respx.get(f"{BASE_URL}/services/quotes/quoteInformation").mock(

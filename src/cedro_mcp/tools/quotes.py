@@ -5,24 +5,31 @@ Quotes & assets tools. Mapeia os endpoints sob ``/services/quotes/``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 from urllib.parse import quote
+
+from pydantic import BeforeValidator
 
 from ..auth.entitlements import require_scope
 from ..auth.scopes import MARKETDATA_READ
 from ..models import Index, Market, Quote, QuoteInformation, SymbolList
-from ._helpers import READ_ONLY_ANNOTATIONS, parse_list, parse_one
+from ._helpers import READ_ONLY_ANNOTATIONS, as_list, parse_list, parse_one
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
     from ..client import CedroClient
 
+#: O schema exposto continua "array de strings" (BeforeValidator não muda a anotação usada pra
+#: gerar o JSON schema) — só passa a tolerar quem manda um símbolo solto como string em vez de
+#: lista de 1 item, erro comum de chamador de LLM na primeira tentativa.
+Symbols = Annotated[list[str], BeforeValidator(as_list)]
+
 
 def register(mcp: "FastMCP", client: "CedroClient") -> None:
     @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
     @require_scope(MARKETDATA_READ)
-    def md_get_quote(symbols: list[str]) -> list[Quote]:
+    def md_get_quote(symbols: Symbols) -> list[Quote]:
         """Snapshot de cotação (preço, topo de book, volumes) de 1+ ativos.
 
         Quote snapshot (price, top-of-book, volumes) for one or more assets.
