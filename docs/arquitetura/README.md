@@ -11,6 +11,7 @@ Ler nesta ordem:
 7. [Decisão de transporte de credencial](06-credential-transport.md)
 8. [Tools — consolidação (futuro)](07-tools-consolidation.md)
 9. [Plano por fases](08-plano-por-fases.md)
+10. [Deploy ativo — Hostinger VPS + Cloudflare Tunnel](09-deploy-hostinger-cloudflare.md)
 
 Produzido junto com o saneamento do repositório (ver `README.md` na raiz e
 `docs/estado-atual-mcp-market-data.md`) — sem features novas, sobre o código como ele está hoje.
