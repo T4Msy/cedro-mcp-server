@@ -40,7 +40,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from .credentials import RestCredentials
+from .credentials import CedroCredentialBundle, RestCredentials
 
 if TYPE_CHECKING:
     from .config import Settings
@@ -85,10 +85,13 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         self._clients: dict[str, OAuthClientInformationFull] = {}
         self._flows: dict[str, _PendingFlow] = {}
         self._auth_codes: dict[str, AuthorizationCode] = {}
-        self._pending_credentials: dict[str, RestCredentials] = {}
+        #: token de autorização → bundle (pode conter REST, Socket e/ou Trading — ver
+        #: credentials.py). Hoje o formulário só coleta REST; Socket/Trading entram quando os
+        #: respectivos clientes existirem (Fases 1 e 2 do dossiê de arquitetura).
+        self._pending_credentials: dict[str, CedroCredentialBundle] = {}
         self._access_tokens: dict[str, AccessToken] = {}
-        #: Único estado que o resto do servidor lê (`credentials.py`) — token → credencial.
-        self.credentials_by_token: dict[str, RestCredentials] = {}
+        #: Único estado que o resto do servidor lê (`credentials.py`) — token → bundle.
+        self.credentials_by_token: dict[str, CedroCredentialBundle] = {}
 
     # ---- Dynamic Client Registration (RFC 7591) — o MCP client se registra sozinho ----
 
@@ -119,18 +122,19 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
     async def exchange_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: AuthorizationCode
     ) -> OAuthToken:
-        creds = self._pending_credentials.pop(authorization_code.code, None)
+        bundle = self._pending_credentials.pop(authorization_code.code, None)
         self._auth_codes.pop(authorization_code.code, None)
-        if creds is None:
+        if bundle is None:
             raise TokenError("invalid_grant", "Código de autorização inválido, expirado ou já usado.")
         token = secrets.token_urlsafe(32)
-        self.credentials_by_token[token] = creds
+        self.credentials_by_token[token] = bundle
+        subject = (bundle.rest or bundle.socket or bundle.trading)
         self._access_tokens[token] = AccessToken(
             token=token,
             client_id=authorization_code.client_id,
             scopes=authorization_code.scopes,
             expires_at=int(time.time()) + _ACCESS_TOKEN_TTL,
-            subject=creds.user,
+            subject=subject.user if subject else None,
         )
         return OAuthToken(
             access_token=token,
@@ -241,7 +245,7 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
             resource=flow.params.resource,
             subject=login,
         )
-        self._pending_credentials[code] = creds
+        self._pending_credentials[code] = CedroCredentialBundle(rest=creds)
         redirect_url = construct_redirect_uri(
             str(flow.params.redirect_uri), code=code, state=flow.params.state
         )

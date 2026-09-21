@@ -128,7 +128,7 @@ def test_full_flow_issues_token_and_credential_provider_resolves_it(
     assert access_token.subject == "tester"
 
     cred_provider = WebLoginCredentialProvider(provider)
-    creds = cred_provider.credentials_for(access_token)
+    creds = cred_provider.rest_credentials_for(access_token)
     assert creds.user == "tester"
     assert creds.password == "secret"
 

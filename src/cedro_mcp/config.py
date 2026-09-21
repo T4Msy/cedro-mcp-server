@@ -40,6 +40,12 @@ class Settings:
     news_client_secret: str | None
     docs_path: Path
     http_timeout: float
+    #: Credenciais de serviço para Socket/Trading (só usadas por `ServiceAccountCredentialProvider`
+    #: — dev/stdio; em produção via `MCP_WEB_LOGIN`, cada usuário traz a própria no formulário).
+    socket_user: str | None = None
+    socket_password: str | None = None
+    trading_user: str | None = None
+    trading_password: str | None = None
 
     # --- Auth do chamador (IAM / API key) ---
     iam_issuer: str | None = None
@@ -144,6 +150,10 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         news_client_secret=env.get("CEDRO_NEWS_CLIENT_SECRET") or None,
         docs_path=Path(docs_raw).expanduser(),
         http_timeout=float(env.get("CEDRO_HTTP_TIMEOUT", "15")),
+        socket_user=env.get("CEDRO_SOCKET_USER") or None,
+        socket_password=env.get("CEDRO_SOCKET_PASS") or None,
+        trading_user=env.get("CEDRO_TRADING_USER") or None,
+        trading_password=env.get("CEDRO_TRADING_PASS") or None,
         iam_issuer=env.get("CEDRO_IAM_ISSUER") or None,
         iam_jwks_url=env.get("CEDRO_IAM_JWKS_URL") or None,
         iam_audience=env.get("CEDRO_IAM_AUDIENCE") or None,

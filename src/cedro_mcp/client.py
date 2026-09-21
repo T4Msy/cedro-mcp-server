@@ -73,7 +73,7 @@ class SessionRegistry:
         key = self._provider.session_key(principal)
         session = self._sessions.get(key)
         if session is None:
-            credentials = self._provider.credentials_for(principal)
+            credentials = self._provider.rest_credentials_for(principal)
             http = self._shared_http or httpx.Client(
                 base_url=self._settings.base_url, timeout=self._settings.http_timeout
             )

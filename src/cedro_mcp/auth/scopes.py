@@ -16,12 +16,37 @@ MARKETDATA_READ = "marketdata:read"
 #: Acesso ao módulo de Notícias (plano/contrato separado dentro de Market Data).
 MARKETDATA_NEWS = "marketdata:news"
 
-ALL_SCOPES: tuple[str, ...] = (MARKETDATA_READ, MARKETDATA_NEWS)
+#: Estado ao vivo via Market Data Socket (protocolo Crystal) — cotação/book/fita em tempo real.
+MARKETDATA_STREAM = "marketdata:stream"
+
+#: Consulta de ordens/histórico do Trading (OMS) — nunca concede envio/edição/cancelamento.
+TRADING_READ = "trading:read"
+
+#: Enviar, editar ou cancelar ordem real — inclusive ordens condicionais nativas
+#: (Start/Stop/StopConditional/StopMoving/StopOCO). Ação real, sempre atrás de confirmação em
+#: duas etapas (ver `tools/trading.py`), nunca concedido por default de registro automático.
+TRADING_TRADE = "trading:trade"
+
+#: Motor de gatilho customizado (fora das ordens condicionais nativas da B3) — separado de
+#: TRADING_TRADE de propósito: é uma capability mais arriscada e explicitamente opt-in.
+TRADING_TRIGGER = "trading:trigger"
+
+ALL_SCOPES: tuple[str, ...] = (
+    MARKETDATA_READ,
+    MARKETDATA_NEWS,
+    MARKETDATA_STREAM,
+    TRADING_READ,
+    TRADING_TRADE,
+    TRADING_TRIGGER,
+)
 
 #: Tradução `role` do IAM → escopos MCP. Ajustar quando o Saulo confirmar os nomes reais.
 IAM_ROLE_TO_SCOPES: dict[str, tuple[str, ...]] = {
     "MarketData": (MARKETDATA_READ,),
     "MarketDataNews": (MARKETDATA_NEWS,),
+    "MarketDataSocket": (MARKETDATA_STREAM,),
+    "Trading": (TRADING_READ, TRADING_TRADE),
+    "TradingTrigger": (TRADING_TRIGGER,),
 }
 
 

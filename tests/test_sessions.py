@@ -27,7 +27,7 @@ def test_service_account_shares_one_session_across_principals(settings: Settings
 
 def test_service_account_returns_env_credentials(settings: Settings) -> None:
     provider = ServiceAccountCredentialProvider(settings)
-    assert provider.credentials_for(None) == RestCredentials("tester", "secret")
+    assert provider.rest_credentials_for(None) == RestCredentials("tester", "secret")
     assert provider.session_key(None) == "service-account"
 
 
@@ -45,7 +45,7 @@ def test_per_user_provider_is_an_explicit_stub() -> None:
     token = make_token("marketdata:read", subject="cliente-a")
     assert provider.session_key(token) == "cliente-a"
     with pytest.raises(NotImplementedError, match="Saulo"):
-        provider.credentials_for(token)
+        provider.rest_credentials_for(token)
 
 
 def test_per_user_provider_requires_subject() -> None:
@@ -56,7 +56,7 @@ def test_per_user_provider_requires_subject() -> None:
 class _PerPrincipalProvider:
     """Provider fictício que isola por subject, para provar que o registry suporta isso."""
 
-    def credentials_for(self, principal):  # noqa: ANN001
+    def rest_credentials_for(self, principal):  # noqa: ANN001
         return RestCredentials(principal.subject, "senha")
 
     def session_key(self, principal):  # noqa: ANN001
