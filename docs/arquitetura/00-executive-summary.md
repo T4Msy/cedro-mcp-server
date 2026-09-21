@@ -35,8 +35,7 @@ defeitos que bloqueavam qualquer deploy. As quatro decisões:
    subpasta, transporte "sse" aceito em silêncio, container rodando como root, parâmetros sem
    teto/encoding).
 5. Separa claramente **o que falta no MCP** (resolvido nesta rodada) de **o que falta na Cedro**
-   (pauta de Saulo/Adriel — cota por plano sem dono, ausência de regra de redistribuição) — ver
-   `04-gap-analysis.md`.
+   (cota por plano sem dono, sem prazo por decisão do usuário) — ver `04-gap-analysis.md`.
 
 ## O que esta entrega explicitamente NÃO faz
 
@@ -45,9 +44,6 @@ defeitos que bloqueavam qualquer deploy. As quatro decisões:
   trabalho futuro).
 - Não valida contra a API Market Data real — `scripts/smoke_live.py` fica fora desta rodada, por
   escolha explícita, e continua sendo a pendência mais antiga do projeto.
-- Não resolve a ausência de regra de redistribuição/display-vs-non-display — está fora do que o MCP
-  pode decidir sozinho (ver nota **REQUIRES LEGAL/COMMERCIAL VALIDATION** em `03-commercial-
-  entitlement.md`).
 
 ## Consequência comercial que precisa estar escrita antes de vender
 

@@ -22,16 +22,21 @@ precisa de uma decisão de negócio ou de outro sistema da Cedro — é a pauta 
 
 ## Falta na Cedro (pauta de Saulo/Adriel, não resolvível pelo MCP sozinho)
 
-| Item | Por que não é o MCP que resolve |
+Atualizado em 21/09 com respostas diretas do usuário — ver histórico da sessão.
+
+| Item | Status |
 |---|---|
-| Cota por tier (20k/100k/500k req/mês) sem sistema/dono | O MCP não é o sistema de billing/quota; aplicar isso aqui seria reinventar uma responsabilidade que já foi atribuída (mesmo que a atribuição não tenha sido implementada) a "outro sistema" |
-| Ausência de regra de redistribuição/display-vs-non-display | Decisão jurídica/regulatória, não técnica — ver `03-commercial-entitlement.md` |
-| Nomes reais dos `roles`/`claims` do IAM para escopo MCP | Depende do IAM da Cedro (Saulo); `scopes.py` já isola isso num único ponto de troca |
-| URL de produção do Identity Server, JWKS vs. introspection | Depende da infra de IAM da Cedro |
-| Se a API key é emitida pelo IAM ou por um store próprio do MCP | Decisão de arquitetura de auth que atravessa mais de um produto |
-| Escopo exato do 2º MCP (WebFeed/streaming) | Fora do escopo deste MCP (Market Data F1); é o F2 do blueprint |
-| Limite de conexões simultâneas do Market Data ao interagir com sessão por cliente | Depende de como a Cedro dimensiona o lado Market Data, não do MCP |
-| `md_get_gainers`/`md_get_losers` (Altas/Baixas) retornam `401` na conta usada em teste, com o resto da API funcionando normalmente na mesma sessão | Confirmado ao vivo (21/09, via Claude Desktop). Bate com o padrão já documentado para `candleLast`/`candleDate` — "401 só nesse endpoint" costuma ser produto não provisionado no plano, não sessão inválida. Ação: confirmar com comercial da Cedro se "Altas e Baixas" precisa de liberação separada nesta conta |
+| `md_get_gainers`/`md_get_losers` (Altas/Baixas) retornam `401`, resto da API funciona normal na mesma sessão | **Explicado.** O usuário conferiu e a conta de teste está com a flag `professional=false` — é essa a causa provável do 401 nesses endpoints especificamente (produto ligado a conta "profissional"). Não é bug do MCP; se precisar do ranking nesta conta, é pedir a mudança desse flag/plano à comercial da Cedro. |
+| Nomes reais dos `roles`/`claims` do IAM, URL de produção do Identity Server | **Parado por decisão do usuário.** "Não veremos nada do IAM ainda, vamos continuar da forma que está sendo feita" (login pelo navegador, `MCP_WEB_LOGIN`) até ele pedir pra retomar. Não é mais pauta ativa. |
+| Se a API key é emitida pelo IAM ou por um store próprio do MCP | **Parado junto com o IAM** (item acima) — é pergunta-irmã, mesma decisão de adiar. |
+| Cota por tier (20k/100k/500k req/mês) sem sistema/dono | **Sem prazo, por escolha do usuário** — "isso é quando eu quiser". Não é bloqueio nem pauta urgente; fica registrado como pendência sem dono, para quando ele decidir priorizar. |
+| Ausência de regra de redistribuição/display-vs-non-display | **Fechado — não se aplica.** O usuário confirmou: "nem vai ter, isso é pelo Market Data" — ou seja, essa responsabilidade já é coberta pelo contrato/termos da própria Market Data (o cliente que redistribui já está sujeito às regras dela), não é algo que o MCP precisa resolver ou que crie uma obrigação nova. Removida a marcação **REQUIRES LEGAL/COMMERCIAL VALIDATION** — ver `03-commercial-entitlement.md`. |
+| Escopo exato do 2º MCP (WebFeed/streaming, F2) | Já existe uma recomendação registrada no vault (API WebSocket/WebFeeder, JSON sem o parser do protocolo Crystal) — falta só a Cedro confirmar essa escolha, não é uma pergunta em branco. |
+| Limite de conexões simultâneas do Market Data ao ter múltiplos clientes com sessão própria | **Objetivo confirmado pelo usuário: uma conexão por conta.** Ele vai passar os detalhes numéricos/técnicos depois. Isso é um requisito de design pra levar em conta quando `PerUserCredentialProvider` for implementado de verdade (ver `06-credential-transport.md`) — hoje, se a mesma credencial Market Data logar duas vezes via `/cedro-login` (duas abas/dois clientes MCP), cada login vira um token distinto com sua própria sessão `JSESSIONID`, o que poderia violar esse objetivo de "uma conexão por conta" sem controle adicional. |
+
+Documentação REST (não Socket) sobre limite de conexões: não existe nota equivalente à de Socket
+(`Lidando com o limite de conexao (Socket).md`) para sessões `JSESSIONID` da REST — só a orientação
+de não martelar `SignIn` em loop. Confirmado por busca no vault.
 
 ## Nota sobre outro Gap Analysis já existente no vault
 

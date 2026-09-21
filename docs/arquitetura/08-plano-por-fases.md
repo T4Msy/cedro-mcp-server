@@ -33,12 +33,16 @@ da Fase 1, antes de qualquer deploy de produção com clientes reais.
 
 ## Fase 3 — Deploy e alinhamento comercial
 
-- Resolver a pauta de Saulo/Adriel registrada em `04-gap-analysis.md` (nomes de `roles`/`claims`
-  reais, URL de produção do IAM, dono da cota por tier).
-- Obter validação jurídica/comercial da nota **REQUIRES LEGAL/COMMERCIAL VALIDATION**
-  (`03-commercial-entitlement.md`) antes de qualquer divulgação ampla.
-- Deploy real em Render (ou equivalente), com `MCP_ALLOWED_HOSTS`/`MCP_ALLOWED_ORIGINS`
-  configurados para o host de produção.
+- [x] **Deploy real feito** (21/09) — Hostinger VPS + Cloudflare quick tunnel, com
+  `MCP_WEB_LOGIN=true` (login pelo navegador) em vez de IAM. Ver
+  `09-deploy-hostinger-cloudflare.md`. Uso pessoal/demo, não produção multi-cliente pública ainda.
+- IAM (`roles`/`claims` reais, URL de produção) e emissão de API key: **parados por decisão do
+  usuário** — "vamos continuar da forma que está sendo feita" até ele pedir pra retomar.
+- Redistribuição/display-vs-non-display: **fechado**, não se aplica (decisão do usuário, ver
+  `03-commercial-entitlement.md`) — não é mais bloqueio.
+- Cota por tier: sem dono, sem prazo — fica registrado, não é urgente.
+- Pendente: confirmar com a comercial da Cedro se a conta de teste precisa do flag/plano
+  "profissional" para os endpoints de ranking (achado ao vivo, ver `04-gap-analysis.md`).
 
 ## Fase 4 — Consolidação de tools (opcional, produto)
 
