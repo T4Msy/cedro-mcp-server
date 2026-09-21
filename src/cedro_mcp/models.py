@@ -7,13 +7,45 @@ a doc lista os "principais campos", não necessariamente todos.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from datetime import datetime
+from typing import Annotated
+
+from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 
 class _Base(BaseModel):
     """Base tolerante: aceita e preserva campos não modelados."""
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+
+def _parse_candle_time(value: object) -> datetime | None:
+    """``timeTrade`` do candleLast/candleDate vem em produção como string legível
+    (ex.: ``"Sep 15, 2026 12:00:00 AM"``), não como timestamp numérico — a suposição original
+    (``yyyyMMddHHmm`` numérico) nunca tinha sido confirmada contra a API real e quebrava com
+    ``float_parsing`` assim que um cliente real chamou a tool. Aceita os dois formatos.
+    """
+    if value is None or isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        return datetime.strptime(str(int(value)), "%Y%m%d%H%M")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        for fmt in ("%b %d, %Y %I:%M:%S %p", "%Y%m%d%H%M"):
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return None
+
+
+CandleTime = Annotated[datetime | None, BeforeValidator(_parse_candle_time)]
 
 
 class Quote(_Base):
@@ -116,7 +148,7 @@ class Candle(_Base):
     quantityTrades: float | None = None
     volumeAmount: float | None = None
     volumeFinancier: float | None = None
-    timeTrade: float | None = None
+    timeTrade: CandleTime = None
 
 
 class Book(_Base):

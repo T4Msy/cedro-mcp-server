@@ -5,6 +5,8 @@ Exercita as tools reais (via ToolManager) contra fixtures, com httpx mockado.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import httpx
 import pytest
 import respx
@@ -101,6 +103,34 @@ def test_md_get_candles_last(tool_fns: dict) -> None:
     result = tool_fns["md_get_candles_last"]("PETR4", "D", 2)
     assert len(result) == 2
     assert result[0].high == 38.7
+    # timeTrade no fixture é yyyyMMddHHmm numérico (202607071730) — precisa continuar
+    # aceito além do formato string real (ver teste abaixo).
+    assert result[0].timeTrade == datetime(2026, 7, 7, 17, 30)
+
+
+@respx.mock
+def test_md_get_candles_last_parses_the_real_string_time_format(tool_fns: dict) -> None:
+    """A API real manda `timeTrade` como string legível ("Sep 15, 2026 12:00:00 AM"), não
+    como número — descoberto ao vivo (Claude Desktop bateu em produção e a validação
+    Pydantic rejeitava com `float_parsing` antes desta correção)."""
+    respx.post(f"{BASE_URL}/SignIn").mock(return_value=_SIGNIN_OK)
+    respx.get(f"{BASE_URL}/services/quotes/candleLast/PETR4/D/1").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "symbol": "PETR4",
+                    "price": 48.5,
+                    "open": 48.4,
+                    "high": 48.83,
+                    "low": 48.25,
+                    "timeTrade": "Sep 15, 2026 12:00:00 AM",
+                }
+            ],
+        )
+    )
+    result = tool_fns["md_get_candles_last"]("PETR4", "D", 1)
+    assert result[0].timeTrade == datetime(2026, 9, 15, 0, 0, 0)
 
 
 @respx.mock
