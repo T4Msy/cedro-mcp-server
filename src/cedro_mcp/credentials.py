@@ -47,6 +47,8 @@ class SocketCredentials:
 
     user: str | None
     password: str | None
+    #: Software key opcional, enviada como primeira linha do handshake Crystal.
+    software_key: str | None = None
 
     @property
     def is_complete(self) -> bool:
@@ -111,7 +113,11 @@ class ServiceAccountCredentialProvider:
 
     def __init__(self, settings: Settings) -> None:
         self._rest = RestCredentials(settings.user, settings.password)
-        self._socket = SocketCredentials(settings.socket_user, settings.socket_password)
+        self._socket = SocketCredentials(
+            settings.crystal_user,
+            settings.crystal_password,
+            settings.crystal_software_key,
+        )
         self._trading = TradingCredentials(settings.trading_user, settings.trading_password)
 
     def rest_credentials_for(self, principal: AccessToken | None) -> RestCredentials:

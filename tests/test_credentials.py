@@ -42,8 +42,8 @@ def test_service_account_provider_resolves_all_three_from_settings(settings: Set
 
     settings = replace(
         settings,
-        socket_user="s-user",
-        socket_password="s-pass",
+        crystal_user="s-user",
+        crystal_password="s-pass",
         trading_user="t-user",
         trading_password="t-pass",
     )

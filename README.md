@@ -1,16 +1,19 @@
 # Cedro MCP Server — rumo ao "Cedro Connect IA"
 
-Servidor **MCP** que expõe as APIs da Cedro como *tools* para IAs. Cobria só Market Data REST
-(read-only); agora também cobre **Trading** (envio/edição/cancelamento de ordem, sempre atrás de
-confirmação humana em duas etapas). **Market Data Socket** (streaming) é a próxima fase. O nome e
+Servidor **MCP** que expõe as APIs da Cedro como *tools* para IAs. Cobre Market Data REST, streaming
+via **Socket Crystal (TCP/Telnet, porta 81)** e **Trading** (envio/edição/cancelamento de ordem, sempre atrás de
+confirmação humana em duas etapas). O nome e
 a instrução do servidor ainda dizem "cedro-market-data" — o rename pra "Cedro Connect IA" é a
 última etapa do roadmap (`docs/arquitetura/08-plano-por-fases.md`, Fase 4), não afeta
 funcionalidade.
 
-> **Status:** construído e testado com **mocks/fixtures** (132 testes). Market Data REST está em
+> **Status:** construído e testado com **mocks/fixtures** (139 testes). Market Data REST está em
 > produção pessoal (deploy real, ver `docs/arquitetura/09-deploy-hostinger-cloudflare.md`).
 > Trading tem cobertura de teste completa mas **nunca rodou contra a API real** — ver
 > `docs/arquitetura/10-trading-auth.md` antes de usar `trading_confirm` com dinheiro de verdade.
+> Streaming ainda precisa de uma credencial Socket Crystal de homologação para validação real antes
+> de ser ligado no deploy. Os endpoints documentados são `crystalhomologacao.cedrotech.com:81` e,
+> em produção, `datafeed1.cedrotech.com:81` com `datafeed2.cedrotech.com:81` como failover.
 > Arquitetura e decisões comerciais documentadas em `docs/arquitetura/`.
 
 ## Arquitetura
@@ -34,6 +37,7 @@ funcionalidade.
 |---|---|
 | `marketdata:read` | 17 tools: cotações, candles, book, negócios, rankings, altas/baixas |
 | `marketdata:news` | 9 tools de notícias |
+| `marketdata:stream` | 5 tools de streaming: cotação, livro, fita, cancelamento e status |
 
 `marketdata:read` é exigido para conectar ao servidor. Nomes **provisórios** até a Cedro confirmar os
 `roles`/`claims` reais do IAM — o único ponto de verdade é `src/cedro_mcp/auth/scopes.py`.
@@ -53,6 +57,21 @@ funcionalidade.
 
 A documentação pública da skill `market-data-rest` também é exposta como **resources**
 `cedro-docs://index` e `cedro-docs://note/{token}` (nunca o vault interno).
+
+### Market Data streaming (5, read-only)
+
+| Tool | Comportamento |
+|---|---|
+| `stream_get_quote` | Assina a cotação e devolve o último snapshot (último, bid e ask) |
+| `stream_get_book` | Assina o livro agregado via `SAB`; `A` = compra e `V` = venda |
+| `stream_get_tape` | Assina a fita e devolve os últimos N negócios do cache |
+| `stream_unsubscribe` | Cancela as assinaturas do ativo e limpa seus snapshots locais |
+| `stream_status` | Mostra conexão e ativos assinados, sem abrir login só para consultar status |
+
+As tools exigem `marketdata:stream` e uma credencial **Socket Crystal** (separada de REST). Configure
+`CEDRO_CRYSTAL_HOST` (host único ou lista separada por vírgulas), `CEDRO_CRYSTAL_PORT=81`,
+`CEDRO_CRYSTAL_USER` e `CEDRO_CRYSTAL_PASSWORD`. O processo mantém uma conexão por credencial,
+usa `MDC 1` antes de `SQT`, e aplica backoff mínimo de 3 segundos no failover.
 
 ### Trading (6 — leitura + ação real com confirmação)
 
@@ -99,9 +118,11 @@ mcp dev src/cedro_mcp/server.py   # Inspector (requer Node/npx)
 
 Alternativa ao IAM/API key acima, pra quando não há IAM da Cedro configurado ainda: com
 `MCP_WEB_LOGIN=true`, o próprio MCP vira a autoridade OAuth. O cliente MCP (Claude Desktop,
-claude.ai, etc.) abre uma aba pedindo **login e senha da Market Data REST**, o servidor confirma
-contra o `SignIn` real da Cedro, e devolve um token — sem copiar/colar nada, sem senha em arquivo
-de config. Implementação em `src/cedro_mcp/web_login.py`; decisão registrada em
+claude.ai, etc.) abre uma aba para informar as credenciais dos produtos desejados: REST, Streaming
+Socket e/ou Trading. REST e Trading são confirmados no login; Socket só faz handshake quando uma
+tool `stream_*` for solicitada, prevenindo uma conexão extra. O servidor devolve um token — sem
+copiar/colar nada, sem senha em arquivo de config. Implementação em `src/cedro_mcp/web_login.py`;
+decisão registrada em
 `docs/arquitetura/06-credential-transport.md`.
 
 ```powershell
@@ -124,13 +145,16 @@ $env:MCP_WEB_LOGIN="true"; python -m cedro_mcp.server
    **hash** da credencial (nunca a credencial em si), store compartilhado entre réplicas, limitador
    de `SignIn` por login (a conta Market Data tolera pouco login/dia), e credencial fora de
    log/trace/erro/resposta de tool. Ver `docs/arquitetura/`.
+4. **Streaming:** o cache/conector é local ao processo. Execute exatamente **uma réplica por
+   credencial Socket**; múltiplas réplicas fariam logins paralelos, podendo derrubar ou bloquear a
+   conta. Configure somente os hosts Crystal documentados e use `datafeed2` apenas como failover.
 
 ## Testes
 
 ```powershell
-pytest          # 68 testes: auth, entitlements, sessões, HTTP, parsing, resources — tudo mockado
+pytest          # 139 testes: auth, entitlements, REST, Trading, Socket Crystal/cache e login — mockados
 ruff check .
-python scripts/smoke_live.py     # validação real; pula sozinho sem credenciais (próxima rodada)
+python scripts/smoke_live.py     # smoke REST real; pula sozinho sem credenciais
 ```
 
 ## Pendências (perguntar ao Saulo/Adriel)
@@ -142,12 +166,11 @@ pauta da Cedro, não do MCP — ver Gap Analysis em `docs/arquitetura/`:
 - IAM: URL de produção, validação por **JWKS** ou **introspection**, nomes reais dos `roles`/`claims`.
 - API key: o IAM emite/gerencia, ou criamos o store?
 - Cota por plano (20k/100k/500k req/mês): não é aplicada em lugar nenhum hoje — sem dono.
-- Redistribuição/display-vs-non-display: nenhum documento existe — **REQUIRES LEGAL/COMMERCIAL
-  VALIDATION**.
-- Escopo do 2º MCP (**WebFeed**/streaming) e limite de conexões simultâneas do Market Data.
+- Credencial Crystal de homologação para executar o gate TCP real; os hosts/porta já estão documentados.
 
 ## Próximas fases
 
-F2 streaming (a [API WebSocket](../API's%20Cedro/10-Geral-e-Conexao/API%20WebSocket%20(WebFeeder).md)
-entrega JSON, sem o parser TCP do Crystal — candidata preferencial), depois Trading (com confirmação
-por ordem), Conta/Análise e Cadastro/Backoffice.
+A implementação da Fase 2 usa o **Socket Crystal TCP**: handshake por prompts, framing recebido por
+`\n`, comandos enviados com `\r\n`, merge incremental de `T:` e os cabeçalhos `Z:`/`V:` para book/fita.
+O próximo gate é validá-la com credencial de homologação; depois vêm Conta/Análise e
+Cadastro/Backoffice.

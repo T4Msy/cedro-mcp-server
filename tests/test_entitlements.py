@@ -8,7 +8,7 @@ import httpx
 import pytest
 import respx
 
-from cedro_mcp.auth.scopes import MARKETDATA_NEWS, MARKETDATA_READ
+from cedro_mcp.auth.scopes import MARKETDATA_NEWS, MARKETDATA_READ, MARKETDATA_STREAM
 from cedro_mcp.client import CedroClient
 from cedro_mcp.config import Settings
 from cedro_mcp.errors import CedroEntitlementError
@@ -22,6 +22,7 @@ NEWS_TOOLS = 9
 #: 2 leitura (trading_list_orders_today, trading_get_order_history) + 4 escrita
 #: (preview_order, preview_cancel_order, preview_edit_order, confirm).
 TRADING_TOOLS = 6
+STREAM_TOOLS = 5
 
 
 def _tool_names(mcp) -> set[str]:
@@ -51,10 +52,18 @@ def test_full_token_lists_all_tools(settings: Settings, client: CedroClient) -> 
     assert len([n for n in names if n.startswith("news_")]) == NEWS_TOOLS
 
 
+def test_stream_scope_lists_only_streaming_tools(settings: Settings, client: CedroClient) -> None:
+    mcp = build_server(settings=settings, client=client)
+    with as_principal(MARKETDATA_STREAM):
+        names = _tool_names(mcp)
+    assert len(names) == STREAM_TOOLS
+    assert all(name.startswith("stream_") for name in names)
+
+
 def test_no_auth_context_lists_everything(settings: Settings, client: CedroClient) -> None:
     """Sem autenticação ativa (stdio/dev), nada é filtrado."""
     mcp = build_server(settings=settings, client=client)
-    assert len(_tool_names(mcp)) == MARKET_TOOLS + NEWS_TOOLS + TRADING_TOOLS
+    assert len(_tool_names(mcp)) == MARKET_TOOLS + NEWS_TOOLS + TRADING_TOOLS + STREAM_TOOLS
 
 
 # ---- execução negada -------------------------------------------------------
@@ -73,6 +82,13 @@ def test_market_tool_denied_without_read_scope(settings: Settings, client: Cedro
     with as_principal(MARKETDATA_NEWS):
         with pytest.raises(CedroEntitlementError, match="marketdata:read"):
             fns["md_list_markets"]()
+
+
+def test_stream_tool_denied_without_stream_scope(settings: Settings, client: CedroClient) -> None:
+    fns = _fns(build_server(settings=settings, client=client))
+    with as_principal(MARKETDATA_READ):
+        with pytest.raises(CedroEntitlementError, match="marketdata:stream"):
+            fns["stream_status"]()
 
 
 @respx.mock

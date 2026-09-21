@@ -56,6 +56,9 @@ services:
       MCP_HOST: 0.0.0.0
       MCP_PORT: "8000"
       MCP_WEB_LOGIN: "true"
+      # Socket Crystal TCP (Fase 2): homologação ou produção com failover.
+      # CEDRO_CRYSTAL_HOST: "datafeed1.cedrotech.com,datafeed2.cedrotech.com"
+      # CEDRO_CRYSTAL_PORT: "81"
       MCP_RESOURCE_URL: "https://skating-committees-during-monica.trycloudflare.com/mcp"
       MCP_ALLOWED_HOSTS: "skating-committees-during-monica.trycloudflare.com"
       MCP_ALLOWED_ORIGINS: "https://skating-committees-during-monica.trycloudflare.com"
@@ -77,5 +80,9 @@ depois. Evite redeployar sem necessidade real enquanto alguém estiver testando 
   (URL estável, sem esse problema de redeploy).
 - **Processo único**: as credenciais logadas via `/cedro-login` ficam em memória do processo
   `app` — reiniciar o container desloga todo mundo (ver `06-credential-transport.md`).
+- **Streaming Fase 2**: mantenha **uma única réplica** de `app` para cada credencial Socket Crystal. O
+  conector/cache é local ao processo e subir réplicas paralelas pode abrir logins simultâneos para a
+  mesma conta, causando desconexão ou bloqueio pela Cedro. Só habilitar `CEDRO_CRYSTAL_HOST` depois de
+  configurar a credencial e concluir o gate real.
 - `CEDRO_DOCS_PATH` não foi configurado neste deploy — `cedro-docs://` fica vazio (a skill
   `market-data-rest` não está na imagem; seria preciso vendorizá-la no repo pra incluir).

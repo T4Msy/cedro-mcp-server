@@ -40,10 +40,20 @@ class Settings:
     news_client_secret: str | None
     docs_path: Path
     http_timeout: float
+    #: Hosts TCP do Socket Crystal. Produção: datafeed1/datafeed2; homologação:
+    #: crystalhomologacao.cedrotech.com. A porta padrão é 81.
+    crystal_host: str | None = None
+    crystal_port: int = 81
+    #: Quanto uma tool de streaming espera pelo primeiro snapshot depois de assinar um ativo.
+    stream_snapshot_timeout: float = 5.0
+    #: Limite local do histórico de negócios por ativo, para não crescer indefinidamente.
+    stream_tape_limit: int = 1_000
     #: Credenciais de serviço para Socket/Trading (só usadas por `ServiceAccountCredentialProvider`
     #: — dev/stdio; em produção via `MCP_WEB_LOGIN`, cada usuário traz a própria no formulário).
-    socket_user: str | None = None
-    socket_password: str | None = None
+    crystal_user: str | None = None
+    crystal_password: str | None = None
+    #: Software key opcional enviada como primeira linha do handshake Crystal.
+    crystal_software_key: str | None = None
     trading_user: str | None = None
     trading_password: str | None = None
     #: BASE64 é o default confirmado em campo; "rsa" nunca foi confirmado ao vivo — ver
@@ -174,8 +184,13 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         news_client_secret=env.get("CEDRO_NEWS_CLIENT_SECRET") or None,
         docs_path=Path(docs_raw).expanduser(),
         http_timeout=float(env.get("CEDRO_HTTP_TIMEOUT", "15")),
-        socket_user=env.get("CEDRO_SOCKET_USER") or None,
-        socket_password=env.get("CEDRO_SOCKET_PASS") or None,
+        crystal_host=env.get("CEDRO_CRYSTAL_HOST") or None,
+        crystal_port=int(env.get("CEDRO_CRYSTAL_PORT", "81")),
+        stream_snapshot_timeout=float(env.get("CEDRO_STREAM_SNAPSHOT_TIMEOUT", "5")),
+        stream_tape_limit=int(env.get("CEDRO_STREAM_TAPE_LIMIT", "1000")),
+        crystal_user=env.get("CEDRO_CRYSTAL_USER") or None,
+        crystal_password=env.get("CEDRO_CRYSTAL_PASSWORD") or None,
+        crystal_software_key=env.get("CEDRO_CRYSTAL_SOFTWARE_KEY") or None,
         trading_user=env.get("CEDRO_TRADING_USER") or None,
         trading_password=env.get("CEDRO_TRADING_PASS") or None,
         trading_encryption=_normalize_trading_encryption(env.get("CEDRO_TRADING_ENCRYPTION")),

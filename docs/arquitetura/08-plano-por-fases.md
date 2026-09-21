@@ -11,25 +11,33 @@ Escopo fechado nesta rodada, sem features novas:
 - [x] `MCP_TRANSPORT` rejeita `"sse"` em vez de tratá-lo como Streamable HTTP em silêncio.
 - [x] Container roda como usuário não-root.
 - [x] `md_get_candles_last(count)` com teto; encoding em `news_search`/`md_get_quote`.
-- [x] README/docs com contagem de testes atualizada (68) e modelo de credencial atualizado.
+- [x] README/docs com contagem de testes atualizada (139) e modelo de credencial atualizado.
 - [x] Este dossiê de arquitetura (`docs/arquitetura/`).
 
 Critério de pronto: `pytest`/`ruff` verdes, teste de vazamento do vault passando, `git log`
 mostrando a canônica versionada.
 
-## Fase 1 — Credencial por cliente (Alternativa A)
+## Fase 1 — Trading (concluída)
 
-Implementar as consequências obrigatórias registradas em `06-credential-transport.md`:
-`PerUserCredentialProvider` real, sessão `JSESSIONID` cacheada por hash de credencial com store
-compartilhado, limitador de `SignIn` por login, revisão de `stateless_http`. Depende de decisão
-explícita sobre o store de sessão compartilhado (Redis ou equivalente) se o deploy for multi-réplica
-desde o início.
+- [x] Cliente OMS, handshake `brokerServiceLogin`, leitura de ordens e ações reais atrás do gate
+  `preview → confirm` de uso único.
+- [x] Login pelo navegador aceita credenciais de Trading como produto opcional e separado.
+- [ ] Validação contra ambiente real de homologação antes de liberar `trading_confirm` para uso real
+  (ver `10-trading-auth.md`).
 
-## Fase 2 — Validação contra a API real
+## Fase 2 — Market Data streaming (implementação concluída; validação real pendente)
 
-`scripts/smoke_live.py` contra credencial de sandbox/homologação real. Bloqueado por: obter uma
-credencial de teste da Cedro. É a pendência mais antiga do projeto e deve ser o próximo passo depois
-da Fase 1, antes de qualquer deploy de produção com clientes reais.
+- [x] Cliente Socket Crystal TCP, com handshake sob demanda e cache de cotação, livro agregado
+  e fita por ativo.
+- [x] Cinco tools de leitura (`stream_get_quote`, `stream_get_book`, `stream_get_tape`,
+  `stream_unsubscribe`, `stream_status`) protegidas por `marketdata:stream`.
+- [x] Uma conexão por hash de credencial Socket dentro do processo; `MDC 1`, failover com backoff
+  mínimo de 3 segundos e sem abrir Socket só para consultar status.
+- [x] Login web aceita uma conta Socket Crystal sem exigir REST; software key opcional no handshake.
+- [ ] Gate real: validar handshake TCP, framing, `T:` incremental, `Z:` e `V:` com credencial de
+  homologação.
+- [ ] Deploy de streaming: exatamente uma réplica por credencial Socket. Para escalar, o conector e
+  o lock precisam ser compartilhados antes de subir mais de um processo.
 
 ## Fase 3 — Deploy e alinhamento comercial
 
@@ -51,6 +59,5 @@ deliberada e isolada, com seu próprio ciclo de revisão — não misturada às 
 
 ## Fora deste plano
 
-- F2 (Market Data Socket / streaming) e demais produtos (Trading, Conta/Análise, Cadastro/
-  Backoffice) — MCPs separados, "1 MCP por produto" (decisão já registrada em `Arquitetura do MCP
-  (transporte, IAM, entitlements).md`), fora do escopo deste servidor.
+- Conta/Análise e Cadastro/Backoffice seguem como MCPs separados; o isolamento por produto/contrato
+  continua sendo a arquitetura adotada.

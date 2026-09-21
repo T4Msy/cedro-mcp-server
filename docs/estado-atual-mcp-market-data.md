@@ -1,65 +1,34 @@
-# Estado atual — MCP Server de Market Data
+# Estado atual — Cedro Connect IA / Market Data MCP
 
-## O que é
+## O que está construído
 
-Um servidor MCP (Model Context Protocol) que expõe a API Market Data da Cedro como *tools* de
-leitura pra IAs — cotações, candles, book, negócios, rankings e notícias. A arquitetura segue o
-modelo de **1 MCP por produto**: este cobre só Market Data. WebFeed e os demais produtos
-(Trading, Conta/Análise, Cadastro/Backoffice) ficam isolados em servidores próprios, mais adiante.
+O servidor MCP expõe três superfícies da Cedro para IAs:
 
-## O que já está construído
+- **Market Data REST:** 26 tools somente-leitura para cotações, candles, livro, negócios, rankings e notícias.
+- **Streaming Socket Crystal (Fase 2):** 5 tools `stream_*` para cotação, livro agregado, fita, cancelamento de assinatura e status. Uma conexão TCP é compartilhada por hash de credencial Socket dentro do processo; o cache nunca é compartilhado entre contas.
+- **Trading (Fase 1):** 2 tools de consulta e 4 ferramentas de ação protegidas por `preview → confirm`, com token de uso único.
 
-26 tools no total — 17 de cotações/candles/book/negócios/rankings e 9 de notícias — mais os
-recursos de documentação expostos como `cedro-docs://`. Todas as tools são de leitura pura; não
-há nenhuma ação de escrita/execução neste MCP (isso fica reservado pro futuro MCP de Trading).
+Há 139 testes automatizados para autenticação, escopos, REST, Socket Crystal/cache, login web e Trading; `ruff check .` está limpo.
 
-- **Auth do chamador**: JWT via IAM da Cedro (Identity Server) ou API key pra automação/robôs.
-  Autorização por escopo — o cliente só enxerga e só executa as tools do plano contratado
-  (`marketdata:read` pras 17 tools de mercado, `marketdata:news` pras 9 de notícias).
-- **Transporte Streamable HTTP** — cliente conecta só com URL + token, sem instalar nada.
-  `stdio` também está disponível, mas só pra uso em desenvolvimento local.
-- **Rate limit por token**, aplicado via middleware.
-- **Credencial downstream desacoplada por interface** (`CredentialProvider`): decidido — credencial
-  do próprio cliente (a `PerUserCredentialProvider`, enviada por requisição); `ServiceAccountCredentialProvider`
-  fica só para desenvolvimento local (detalhe abaixo).
-- **68 testes automatizados** (auth, entitlements, sessões, parsing, HTTP, resources), todos passando.
+## Limites e proteções relevantes
 
-A implementação está estável e organizada. O que falta pra considerar isso pronto pra cliente
-não é código — são decisões de produto/infra ainda em aberto, listadas abaixo.
+- REST, Socket e Trading usam credenciais separadas. O login pelo navegador aceita qualquer combinação dos três produtos; uma conta Socket não precisa possuir credencial REST.
+- As tools de streaming exigem `marketdata:stream`. O cache/conector só abre quando uma tool que precisa de dados é chamada; `stream_status` não cria login nem conexão.
+- `CEDRO_CRYSTAL_HOST` usa `crystalhomologacao.cedrotech.com` em homologação ou `datafeed1.cedrotech.com,datafeed2.cedrotech.com` em produção; `CEDRO_CRYSTAL_PORT=81`.
+- O processo mantém exatamente uma conexão por credencial; em queda, tenta failover com backoff mínimo de 3 segundos e nunca repete `Invalid Login` automaticamente.
+- `CEDRO_CRYSTAL_SOFTWARE_KEY` é opcional; software key vazia é enviada como primeira linha do handshake.
 
-## Por que foi feito assim
+## Validação pendente
 
-- **Streamable HTTP em vez de SSE**: SSE é o transporte legado do protocolo MCP. Streamable HTTP
-  atende o mesmo requisito prático (URL + token, zero instalação, rate limit) sem já nascer
-  obsoleto. Decidido: MVP remoto em Streamable HTTP desde já (`MCP_TRANSPORT` agora rejeita
-  `"sse"` explicitamente em vez de tratá-lo como Streamable HTTP em silêncio).
-- **Credencial plugável em vez de hardcoded**: a interface (`CredentialProvider`) permitiu decidir
-  o modelo (credencial do próprio cliente, por requisição) sem reescrever o resto do servidor —
-  troca-se só a implementação (`PerUserCredentialProvider`).
-- **Auth por escopo/entitlement**: pensado pra já sustentar múltiplos planos (ex.: cliente que só
-  contratou cotações não enxerga nem executa as tools de notícias).
+A Fase 2 está validada com transporte fake/fixtures, mas ainda não contra o Socket Crystal real. O gate requer:
 
-## O que falta validar
+1. Host/porta Crystal de homologação ou produção (`crystalhomologacao.cedrotech.com:81` ou `datafeed1/datafeed2:81`).
+2. Credencial Socket de teste, distinta da REST.
+3. Confirmação ao vivo do handshake e das mensagens `T:`, `Z:` e `V:`, em especial a semântica dos campos da fita.
+4. Confirmação do limite numérico de conexões por conta antes de qualquer escala horizontal.
 
-**Nunca rodou contra a API real da Cedro.** Os 68 testes usam mocks/fixtures. Existe um script
-de validação contra o ambiente real (`smoke_live.py`), mas ele pula automaticamente quando não
-encontra credencial de sandbox — e ainda não recebemos uma pra rodar de verdade. Ou seja: o
-código faz o que os testes descrevem, mas o comportamento contra o Market Data real (parsing de
-resposta real, sessão, rate limit do lado deles) ainda não foi confirmado.
+Trading também permanece bloqueado para uso real até executar o harness de homologação descrito em `docs/arquitetura/10-trading-auth.md`.
 
-## O que precisa ser decidido antes de ir pra produção
+## Fora do escopo atual
 
-**Decidido** (ver `docs/arquitetura/`): transporte remoto Streamable HTTP desde o MVP; credencial
-downstream = a do próprio cliente, enviada por requisição; entitlement comercial incluído no
-contrato Market Data, sem SKU novo. O que resta:
-
-1. **Credencial de sandbox** pra rodar a validação contra a API real antes de qualquer deploy de
-   produção (`scripts/smoke_live.py`).
-2. **IAM de produção**: URL definitiva, validação por JWKS ou introspection, e os nomes reais dos
-   `roles`/`claims` (hoje são provisórios).
-3. **Rate limit**: por token, por conta ou por `client_id`? Existe limite diferente por plano?
-   (Hoje o rate limit é em memória por processo — com múltiplas réplicas o limite efetivo escala
-   com o número de réplicas, não é um limite global; pra isso, precisaria de um backend
-   compartilhado tipo Redis.)
-4. **Cota por plano e redistribuição**: pauta comercial ainda sem dono — ver Gap Analysis e a nota
-   **REQUIRES LEGAL/COMMERCIAL VALIDATION** em `docs/arquitetura/`.
+IAM de produção, API keys gerenciadas, cota global por plano, Conta/Análise e Cadastro/Backoffice seguem como decisões/produtos separados. Ver `docs/arquitetura/`.

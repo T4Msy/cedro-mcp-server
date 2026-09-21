@@ -28,7 +28,12 @@ from cedro_mcp.auth.scopes import (
 from cedro_mcp.auth.token_verifier import CedroTokenVerifier, build_jwks_decoder
 from cedro_mcp.client import CedroClient
 from cedro_mcp.config import ConfigurationError, Settings, load_settings
-from cedro_mcp.credentials import CredentialProvider, ServiceAccountCredentialProvider, WebLoginCredentialProvider
+from cedro_mcp.credentials import (
+    CredentialProvider,
+    ServiceAccountCredentialProvider,
+    WebLoginCredentialProvider,
+)
+from cedro_mcp.streaming import MarketDataStreamClient
 from cedro_mcp.tools import trading as tools_trading
 from cedro_mcp.trading.client import TradingClient
 from cedro_mcp.trading.confirmation import ConfirmationStore
@@ -74,6 +79,7 @@ def _issuer_url(resource_url: str, mcp_path: str) -> str:
 def build_server(
     settings: Settings | None = None,
     client: CedroClient | None = None,
+    stream_client: MarketDataStreamClient | None = None,
     token_verifier: TokenVerifier | None = None,
     *,
     enforce_auth_guard: bool = True,
@@ -125,6 +131,7 @@ def build_server(
         credential_provider = ServiceAccountCredentialProvider(settings)
 
     client = client or CedroClient(settings, credential_provider=credential_provider)
+    stream_client = stream_client or MarketDataStreamClient(settings, credential_provider)
     trading_client = TradingClient(settings, credential_provider)
     confirmation_store = ConfirmationStore()
 
@@ -133,7 +140,8 @@ def build_server(
         "host": settings.mcp_host,
         "port": settings.mcp_port,
         "streamable_http_path": settings.mcp_path,
-        # Read-only: sem estado de sessão ⇒ escala horizontal atrás de load balancer.
+        # O protocolo MCP segue sem sessão entre requests. O cache Crystal é estado do processo;
+        # deploys que o habilitam precisam respeitar uma única réplica por credencial Socket.
         "stateless_http": True,
     }
 
@@ -182,7 +190,7 @@ def build_server(
 
     mcp = EntitledFastMCP("cedro-market-data", **kwargs)
 
-    tools.register_all(mcp, client)
+    tools.register_all(mcp, client, stream_client)
     tools_trading.register(mcp, trading_client, confirmation_store, credential_provider, settings)
     resources.register(mcp, settings)
 
@@ -191,6 +199,9 @@ def build_server(
         # app ASGI — não é um atributo do FastMCP em si, só carona pra não precisar mudar a
         # assinatura de build_server() em todo lugar que já a chama.
         mcp.cedro_login_provider = login_provider  # type: ignore[attr-defined]
+
+    # main() fecha esse registro no shutdown. A conexão só nasce quando uma tool stream_* for usada.
+    mcp.cedro_stream_client = stream_client  # type: ignore[attr-defined]
 
     return mcp
 
@@ -201,7 +212,10 @@ def main() -> None:
     mcp = build_server(settings)
 
     if settings.transport == "stdio":
-        mcp.run()
+        try:
+            mcp.run()
+        finally:
+            mcp.cedro_stream_client.close()  # type: ignore[attr-defined]
         return
 
     import uvicorn
@@ -209,7 +223,10 @@ def main() -> None:
     from cedro_mcp.http_app import create_app
 
     app = create_app(mcp, rate_limit=settings.rate_limit, rate_window=settings.rate_window)
-    uvicorn.run(app, host=settings.mcp_host, port=settings.mcp_port)
+    try:
+        uvicorn.run(app, host=settings.mcp_host, port=settings.mcp_port)
+    finally:
+        mcp.cedro_stream_client.close()  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":

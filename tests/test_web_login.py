@@ -162,6 +162,47 @@ def test_wrong_credentials_are_rejected_by_real_signin_check(settings: Settings)
     assert asyncio.run(do_login()) == 303  # volta pro form com erro, não emite código
 
 
+def test_socket_only_login_keeps_the_credential_without_opening_a_socket(settings: Settings) -> None:
+    """REST e Socket são produtos distintos: um cliente streaming não precisa de credencial REST."""
+    from starlette.requests import Request as StarletteRequest
+
+    provider = CedroLoginProvider(settings=settings)
+    client = _client_info()
+    asyncio.run(provider.register_client(client))
+    flow_url = asyncio.run(provider.authorize(client, _params(scopes=["marketdata:stream"])))
+    flow_id = flow_url.split("flow_id=")[1]
+
+    async def do_login() -> str:
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+        }
+
+        async def receive():
+            body = (
+                b"flow_id=%s&socket_login=socket-user&socket_password=socket-pass&socket_software_key=key-42"
+                % flow_id.encode()
+            )
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        response = await provider._handle_login_submit(StarletteRequest(scope, receive))
+        return response.headers["location"]
+
+    redirect = asyncio.run(do_login())
+    code = redirect.split("code=")[1].split("&")[0]
+    auth_code = asyncio.run(provider.load_authorization_code(client, code))
+    assert auth_code is not None
+    token = asyncio.run(provider.exchange_authorization_code(client, auth_code))
+    access_token = asyncio.run(provider.load_access_token(token.access_token))
+    assert access_token is not None
+
+    creds = WebLoginCredentialProvider(provider).socket_credentials_for(access_token)
+    assert creds.user == "socket-user"
+    assert creds.password == "socket-pass"
+    assert creds.software_key == "key-42"
+
+
 # ---- HTTP end-to-end: as rotas /cedro-login estão montadas no app -----------------------
 
 

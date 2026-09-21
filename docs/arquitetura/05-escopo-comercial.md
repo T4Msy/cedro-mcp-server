@@ -18,9 +18,8 @@ implementação — é uma limitação de identidade herdada da própria Market 
 
 - Antes de oferecer este MCP a um cliente, confirmar que o plano dele inclui REST (ou solicitar/
   provisionar uma credencial REST adicional, se a Cedro permitir contratar os dois canais).
-- Um cliente Socket que quer o equivalente deste produto precisa do **futuro MCP de streaming (F2)**
-  — candidato natural é a [[API WebSocket (WebFeeder)]], que já entrega JSON sem o parser TCP do
-  protocolo Crystal, citada no roadmap como candidata preferencial para F2.
+- Um cliente Socket que quer o equivalente deste produto precisa do **MCP de streaming (F2)**,
+  implementado sobre o **Socket Crystal TCP** e documentado na skill `market-data-socket`.
 - Isso deve estar em qualquer material de venda/onboarding deste MCP, não só neste dossiê técnico.
 
 ## O que este documento não decide

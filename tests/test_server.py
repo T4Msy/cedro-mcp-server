@@ -40,6 +40,12 @@ EXPECTED_TOOLS = {
     "news_list_agencies",
     "news_search",
     "news_relevant_facts_by_agency",
+    # streaming (Fase 2)
+    "stream_get_quote",
+    "stream_get_book",
+    "stream_get_tape",
+    "stream_unsubscribe",
+    "stream_status",
 }
 
 
@@ -57,11 +63,12 @@ def test_all_expected_tools_registered(settings: Settings, client: CedroClient) 
 def test_tool_count_matches_blueprint_scope(settings: Settings, client: CedroClient) -> None:
     mcp = _server(settings, client)
     names = {t.name for t in asyncio.run(mcp.list_tools())}
-    # F1: 17 tools de cotações/candles/book/negócios/rankings + 9 de notícias + 6 de Trading
-    # (Fase 1 do roadmap "Cedro Connect IA").
+    # REST: 17 de cotações/candles/book/negócios/rankings + 9 de notícias; Trading: 6;
+    # Fase 2: 5 tools de streaming via Socket Crystal/cache.
     assert len([n for n in names if n.startswith("md_")]) == 17
     assert len([n for n in names if n.startswith("news_")]) == 9
     assert len([n for n in names if n.startswith("trading_")]) == 6
+    assert len([n for n in names if n.startswith("stream_")]) == 5
 
 
 def test_docs_resources_registered(settings: Settings, client: CedroClient) -> None:
