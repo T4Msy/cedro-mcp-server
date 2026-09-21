@@ -56,6 +56,13 @@ class Settings:
     crystal_software_key: str | None = None
     trading_user: str | None = None
     trading_password: str | None = None
+    #: Parâmetro de login HTTP do Trading quando é diferente da identidade OMS.
+    trading_signin_user: str | None = None
+    trading_signin_password: str | None = None
+    #: Identidade enviada no `user-identifier` e usada no brokerServiceLogin.
+    trading_oms_account: str | None = None
+    trading_oms_login: str | None = None
+    trading_oms_password: str | None = None
     #: BASE64 é o default confirmado em campo; "rsa" nunca foi confirmado ao vivo — ver
     #: trading/identity.py e docs/arquitetura/10-trading-auth.md.
     trading_encryption: str = "base64"
@@ -193,6 +200,11 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         crystal_software_key=env.get("CEDRO_CRYSTAL_SOFTWARE_KEY") or None,
         trading_user=env.get("CEDRO_TRADING_USER") or None,
         trading_password=env.get("CEDRO_TRADING_PASS") or None,
+        trading_signin_user=env.get("CEDRO_TRADING_SIGNIN_USER") or None,
+        trading_signin_password=env.get("CEDRO_TRADING_SIGNIN_PASS") or None,
+        trading_oms_account=env.get("CEDRO_OMS_ACCOUNT") or None,
+        trading_oms_login=env.get("CEDRO_OMS_LOGIN") or None,
+        trading_oms_password=env.get("CEDRO_OMS_PASSWORD") or None,
         trading_encryption=_normalize_trading_encryption(env.get("CEDRO_TRADING_ENCRYPTION")),
         trading_jwks_url=env.get("CEDRO_TRADING_JWKS_URL") or None,
         trading_app_name=env.get("CEDRO_TRADING_APP_NAME") or "cedro-connect-ia",

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 from urllib.parse import urlencode
 
 import httpx
@@ -120,6 +122,53 @@ def test_both_products_verified_and_bundled(settings: Settings) -> None:
 
     principal = AccessToken(token=token.access_token, client_id="c", scopes=[])
     assert resolved.trading_credentials_for(principal).user == "10034"
+
+
+def test_trading_accepts_separate_signin_and_oms_credentials(settings: Settings) -> None:
+    """O SignIn pode usar um login diferente da identidade OMS do broker."""
+    provider = CedroLoginProvider(settings=settings)
+    flow_id = _start_flow(provider)
+
+    async def run():
+        with respx.mock(base_url=BASE_URL) as router:
+            signin = router.post("/SignIn").mock(
+                return_value=httpx.Response(
+                    200, text="true", headers={"Set-Cookie": "JSESSIONID=split-123; Path=/"}
+                )
+            )
+            broker = router.get("/services/negotiation/brokerServiceLogin").mock(
+                return_value=_BROKER_LOGIN_OK
+            )
+            response = await _submit(
+                provider,
+                {
+                    "flow_id": flow_id,
+                    "trading_signin_login": "signin-user",
+                    "trading_signin_password": "signin-pass",
+                    "trading_oms_account": "146751",
+                    "trading_oms_login": "oms-user",
+                    "trading_oms_password": "oms-pass",
+                },
+            )
+            return response, signin, broker
+
+    response, signin, broker = asyncio.run(run())
+    assert response.status_code == 302
+    assert signin.calls[0].request.url.params["login"] == "signin-user"
+    assert broker.calls[0].request.url.params["username"] == "oms-user"
+    identity = json.loads(
+        base64.b64decode(broker.calls[0].request.headers["user-identifier"])
+    )
+    assert identity["user_name"] == "oms-user"
+    assert identity["login_oms"] == "oms-user"
+    assert identity["password"] == "oms-pass"
+
+    code = response.headers["location"].split("code=")[1].split("&")[0]
+    bundle = provider._pending_credentials[code]  # noqa: SLF001
+    assert bundle.trading is not None
+    assert bundle.trading.user == "signin-user"
+    assert bundle.trading.oms_account == "146751"
+    assert bundle.trading.oms_login == "oms-user"
 
 
 def test_half_filled_trading_fields_is_rejected_before_any_http_call(settings: Settings) -> None:

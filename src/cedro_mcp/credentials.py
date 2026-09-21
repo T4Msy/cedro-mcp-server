@@ -57,14 +57,38 @@ class SocketCredentials:
 
 @dataclass(frozen=True)
 class TradingCredentials:
-    """Usuário/senha OMS do Trading — conta separada de Market Data (REST e Socket)."""
+    """Credenciais do Trading: SignIn HTTP separado da identidade OMS.
+
+    ``user``/``password`` são mantidos como os nomes históricos do par usado no
+    ``POST /SignIn``. A identidade OMS pode ter login e senha próprios; quando
+    esses campos não são informados, fazemos fallback para o par histórico para
+    preservar o modo de serviço antigo.
+    """
 
     user: str | None
     password: str | None
+    oms_account: str | None = None
+    oms_login: str | None = None
+    oms_password: str | None = None
+
+    @property
+    def oms_account_value(self) -> str | None:
+        """Conta OMS para parâmetros de ordem, quando configurada."""
+        return self.oms_account or self.oms_login or self.user
+
+    @property
+    def oms_login_value(self) -> str | None:
+        """Login usado no header ``user-identifier`` e no brokerServiceLogin."""
+        return self.oms_login or self.oms_account or self.user
+
+    @property
+    def oms_password_value(self) -> str | None:
+        """Senha usada na identidade OMS, com fallback legado para ``password``."""
+        return self.oms_password or self.password
 
     @property
     def is_complete(self) -> bool:
-        return bool(self.user and self.password)
+        return bool(self.user and self.password and self.oms_login_value and self.oms_password_value)
 
 
 @dataclass(frozen=True)
@@ -118,7 +142,28 @@ class ServiceAccountCredentialProvider:
             settings.crystal_password,
             settings.crystal_software_key,
         )
-        self._trading = TradingCredentials(settings.trading_user, settings.trading_password)
+        # Compatibilidade: o modo antigo tinha só CEDRO_TRADING_USER/PASS e usava
+        # o mesmo par no SignIn e no user-identifier. O modo separado aceita o
+        # par CEDRO_USER/PASS (ou CEDRO_TRADING_SIGNIN_*) + CEDRO_OMS_*.
+        has_oms_identity = any(
+            (
+                settings.trading_oms_account,
+                settings.trading_oms_login,
+                settings.trading_oms_password,
+            )
+        )
+        signin_user = settings.trading_signin_user or settings.trading_user
+        signin_password = settings.trading_signin_password or settings.trading_password
+        if has_oms_identity:
+            signin_user = signin_user or settings.user
+            signin_password = signin_password or settings.password
+        self._trading = TradingCredentials(
+            signin_user,
+            signin_password,
+            settings.trading_oms_account,
+            settings.trading_oms_login,
+            settings.trading_oms_password,
+        )
 
     def rest_credentials_for(self, principal: AccessToken | None) -> RestCredentials:
         return self._rest

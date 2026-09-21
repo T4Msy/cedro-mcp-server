@@ -39,3 +39,20 @@ def test_transport_rejects_unknown_value() -> None:
 def test_transport_defaults_to_streamable_http_when_unset() -> None:
     settings = load_settings({})
     assert settings.transport == "streamable-http"
+
+
+def test_trading_loads_separate_signin_and_oms_credentials() -> None:
+    settings = load_settings(
+        {
+            "CEDRO_USER": "signin-user",
+            "CEDRO_PASS": "signin-pass",
+            "CEDRO_OMS_ACCOUNT": "146751",
+            "CEDRO_OMS_LOGIN": "oms-user",
+            "CEDRO_OMS_PASSWORD": "oms-pass",
+        }
+    )
+    assert settings.user == "signin-user"
+    assert settings.password == "signin-pass"
+    assert settings.trading_oms_account == "146751"
+    assert settings.trading_oms_login == "oms-user"
+    assert settings.trading_oms_password == "oms-pass"

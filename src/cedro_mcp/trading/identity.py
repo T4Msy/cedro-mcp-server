@@ -51,7 +51,7 @@ class UserIdentifier:
 
 
 def build_identity(creds: TradingCredentials, *, remote_ip: str) -> UserIdentifier:
-    """Monta a identidade a partir da credencial Trading. ``login_oms`` = ``user_name`` = login."""
+    """Monta a identidade OMS sem confundir o login HTTP com o login de negociação."""
     if not remote_ip:
         raise ValueError(
             "remote_ip é obrigatório e deve ser o IP real de origem — a Cedro usa para "
@@ -59,9 +59,9 @@ def build_identity(creds: TradingCredentials, *, remote_ip: str) -> UserIdentifi
         )
     return UserIdentifier(
         id="1",
-        user_name=creds.user or "",
-        login_oms=creds.user or "",
-        password=creds.password or "",
+        user_name=creds.oms_login_value or "",
+        login_oms=creds.oms_login_value or "",
+        password=creds.oms_password_value or "",
         remote_ip=remote_ip,
     )
 

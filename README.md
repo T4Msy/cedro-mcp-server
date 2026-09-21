@@ -129,6 +129,10 @@ decisão registrada em
 $env:MCP_WEB_LOGIN="true"; python -m cedro_mcp.server
 ```
 
+Na seção Trading, informe separadamente o login/senha do `SignIn` e a conta, login e senha da
+identidade OMS (`user-identifier`). No modo de serviço, isso corresponde a `CEDRO_USER`/`CEDRO_PASS`
+e `CEDRO_OMS_ACCOUNT`/`CEDRO_OMS_LOGIN`/`CEDRO_OMS_PASSWORD`.
+
 > ⚠️ A credencial fica em **memória do processo** enquanto o token for válido (30 dias, sem
 > refresh — expira, reloga pela aba). Nunca em disco, nunca persistida — mas é mais exposição do
 > que o header por requisição puro. Reiniciar o processo desloga todo mundo.

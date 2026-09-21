@@ -223,8 +223,29 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         socket_login = str(form.get("socket_login", "")).strip()
         socket_password = str(form.get("socket_password", ""))
         socket_software_key = str(form.get("socket_software_key", "")).strip()
-        trading_login = str(form.get("trading_login", "")).strip()
-        trading_password = str(form.get("trading_password", ""))
+        # Trading tem duas identidades: o par que abre a sessão HTTP (SignIn) e
+        # a identidade OMS que vai no user-identifier. Os nomes antigos são
+        # aceitos como fallback para clients que ainda postam o formulário v1.
+        trading_signin_login = str(form.get("trading_signin_login", "")).strip()
+        trading_signin_password = str(form.get("trading_signin_password", ""))
+        trading_oms_account = str(form.get("trading_oms_account", "")).strip()
+        trading_oms_login = str(form.get("trading_oms_login", "")).strip()
+        trading_oms_password = str(form.get("trading_oms_password", ""))
+        legacy_trading_login = str(form.get("trading_login", "")).strip()
+        legacy_trading_password = str(form.get("trading_password", ""))
+        if not any(
+            (
+                trading_signin_login,
+                trading_signin_password,
+                trading_oms_account,
+                trading_oms_login,
+                trading_oms_password,
+            )
+        ) and (legacy_trading_login or legacy_trading_password):
+            trading_signin_login = legacy_trading_login
+            trading_signin_password = legacy_trading_password
+            trading_oms_login = legacy_trading_login
+            trading_oms_password = legacy_trading_password
 
         flow = self._flows.get(flow_id)
         if flow is None:
@@ -244,14 +265,31 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
                 ),
                 status_code=303,
             )
-        if bool(trading_login) != bool(trading_password):
+        trading_requested = any(
+            (
+                trading_signin_login,
+                trading_signin_password,
+                trading_oms_account,
+                trading_oms_login,
+                trading_oms_password,
+            )
+        )
+        if trading_requested and (
+            not trading_signin_login
+            or not trading_signin_password
+            or not (trading_oms_account or trading_oms_login)
+            or not trading_oms_password
+        ):
             return RedirectResponse(
                 f"/cedro-login?flow_id={flow_id}&error="
-                + html.escape("Preencha login E senha de Trading, ou deixe os dois em branco."),
+                + html.escape(
+                    "Para Trading, preencha o login e a senha do SignIn, a conta ou login OMS "
+                    "e a senha OMS — ou deixe toda a seção em branco."
+                ),
                 status_code=303,
             )
 
-        if not any((login, socket_login, trading_login)):
+        if not any((login, socket_login, trading_requested)):
             return RedirectResponse(
                 f"/cedro-login?flow_id={flow_id}&error="
                 + html.escape("Informe a credencial de ao menos um produto Cedro."),
@@ -290,8 +328,14 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         )
 
         trading_creds: TradingCredentials | None = None
-        if trading_login and trading_password:
-            trading_creds = TradingCredentials(user=trading_login, password=trading_password)
+        if trading_requested:
+            trading_creds = TradingCredentials(
+                user=trading_signin_login,
+                password=trading_signin_password,
+                oms_account=trading_oms_account or None,
+                oms_login=trading_oms_login or None,
+                oms_password=trading_oms_password or None,
+            )
             try:
                 _verify_trading_credentials(self._settings, trading_creds)
             except TokenError:
@@ -374,9 +418,9 @@ def _render_login_page(flow_id: str, error: str | None) -> str:
 {error_html}
 <form method="post" action="/cedro-login">
   <input type="hidden" name="flow_id" value="{html.escape(flow_id)}">
-  <label for="login">Login (Market Data)</label>
+  <label for="login">Login (Market Data REST)</label>
   <input id="login" name="login" type="text" autocomplete="username" autofocus>
-  <label for="password">Senha (Market Data)</label>
+  <label for="password">Senha (Market Data REST)</label>
   <input id="password" name="password" type="password" autocomplete="current-password">
 
   <details style="margin-top: 20px;">
@@ -397,12 +441,19 @@ def _render_login_page(flow_id: str, error: str | None) -> str:
     <summary style="cursor: pointer; color: #c9d1d9; font-size: 0.9rem;">
       Também operar (Trading) — opcional
     </summary>
-    <p class="hint" style="margin-top: 10px;">Conta OMS separada da Market Data — deixe em
-    branco se você só quer consultar dados, sem enviar ordem.</p>
-    <label for="trading_login">Login (Trading)</label>
-    <input id="trading_login" name="trading_login" type="text" autocomplete="off">
-    <label for="trading_password">Senha (Trading)</label>
-    <input id="trading_password" name="trading_password" type="password" autocomplete="off">
+    <p class="hint" style="margin-top: 10px;">Informe separadamente o login/senha do SignIn e a
+    conta, login e senha da identidade OMS. Deixe toda a seção em branco se você só quer consultar
+    dados, sem enviar ordem.</p>
+    <label for="trading_signin_login">Login do SignIn (Trading)</label>
+    <input id="trading_signin_login" name="trading_signin_login" type="text" autocomplete="off">
+    <label for="trading_signin_password">Senha do SignIn (Trading)</label>
+    <input id="trading_signin_password" name="trading_signin_password" type="password" autocomplete="off">
+    <label for="trading_oms_account">Conta OMS</label>
+    <input id="trading_oms_account" name="trading_oms_account" type="text" autocomplete="off">
+    <label for="trading_oms_login">Login OMS</label>
+    <input id="trading_oms_login" name="trading_oms_login" type="text" autocomplete="off">
+    <label for="trading_oms_password">Senha OMS</label>
+    <input id="trading_oms_password" name="trading_oms_password" type="password" autocomplete="off">
   </details>
 
   <button type="submit">Autenticar</button>

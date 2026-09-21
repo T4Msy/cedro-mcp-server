@@ -59,7 +59,7 @@ def register_order_tools(
     def _trading_identity() -> tuple[str, str]:
         """(username, source_address) da credencial Trading do principal atual."""
         creds = credential_provider.trading_credentials_for(_principal())
-        return creds.user or "", settings.trading_remote_ip
+        return creds.oms_login_value or "", settings.trading_remote_ip
 
     @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
     @require_scope(TRADING_TRADE)

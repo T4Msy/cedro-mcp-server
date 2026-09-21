@@ -79,11 +79,14 @@ class TradingSessionAuth:
         )
         self._identifier_header = encoded
 
+        oms_login = self._credentials.oms_login_value
+        if not oms_login:
+            raise CedroAuthError("Login OMS ausente para brokerServiceLogin.")
         resp = client.get(
             "/services/negotiation/brokerServiceLogin",
             params={
                 "appname": self._settings.trading_app_name,
-                "username": self._credentials.user,
+                "username": oms_login,
             },
             headers=self.identifier_header(),
         )
