@@ -31,6 +31,7 @@ precisa de uma decisão de negócio ou de outro sistema da Cedro — é a pauta 
 | Se a API key é emitida pelo IAM ou por um store próprio do MCP | Decisão de arquitetura de auth que atravessa mais de um produto |
 | Escopo exato do 2º MCP (WebFeed/streaming) | Fora do escopo deste MCP (Market Data F1); é o F2 do blueprint |
 | Limite de conexões simultâneas do Market Data ao interagir com sessão por cliente | Depende de como a Cedro dimensiona o lado Market Data, não do MCP |
+| `md_get_gainers`/`md_get_losers` (Altas/Baixas) retornam `401` na conta usada em teste, com o resto da API funcionando normalmente na mesma sessão | Confirmado ao vivo (21/09, via Claude Desktop). Bate com o padrão já documentado para `candleLast`/`candleDate` — "401 só nesse endpoint" costuma ser produto não provisionado no plano, não sessão inválida. Ação: confirmar com comercial da Cedro se "Altas e Baixas" precisa de liberação separada nesta conta |
 
 ## Nota sobre outro Gap Analysis já existente no vault
 

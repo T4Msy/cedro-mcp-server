@@ -21,8 +21,21 @@ from .errors import CedroAuthError, CedroHTTPError
 from .sessions import NewsAuth, SessionAuth
 
 # Erros HTTP documentados para os endpoints REST (ver [[REST - MOC]] e nota `quote`).
+#
+# 401 é ambíguo na própria API (ver ERROS.md da skill market-data-rest, confirmado ao vivo com
+# md_get_gainers/md_get_losers falhando com o resto da sessão funcionando normalmente): pode ser
+# sessão de verdade inválida, OU o produto/endpoint específico não estar provisionado no plano da
+# conta (o caso documentado é candleLast/candleDate, mas o padrão — funciona em tudo, 401 só num
+# endpoint — é o mesmo). client.py já reautentica 1x antes de propagar; se o 401 persiste depois
+# do retry, "sessão expirada" deixou de ser a explicação mais provável.
 _ERROR_MESSAGES = {
-    401: "Não autorizado (sessão ausente/expirada). Unauthorized.",
+    401: (
+        "Não autorizado. Se outras tools funcionam normalmente na mesma sessão, isto "
+        "provavelmente NÃO é sessão expirada — é o produto deste endpoint específico não estar "
+        "provisionado no plano da conta Market Data (peça a liberação à comercial da Cedro). "
+        "Unauthorized — likely a plan/entitlement gap for this specific endpoint, not an "
+        "expired session, if other tools work fine in the same session."
+    ),
     404: "Recurso não encontrado. Not found.",
     405: "Método não permitido. Method not allowed.",
     408: "Serviço não retornou em tempo hábil. Service timeout.",
