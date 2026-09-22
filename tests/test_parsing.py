@@ -95,12 +95,12 @@ def test_md_list_indices(tool_fns: dict) -> None:
 
 
 @respx.mock
-def test_md_get_candles_last(tool_fns: dict) -> None:
+def test_md_get_candles(tool_fns: dict) -> None:
     respx.post(f"{BASE_URL}/SignIn").mock(return_value=_SIGNIN_OK)
     respx.get(f"{BASE_URL}/services/quotes/candleLast/PETR4/D/2").mock(
         return_value=httpx.Response(200, json=load_fixture("candlelast.json"))
     )
-    result = tool_fns["md_get_candles_last"]("PETR4", "D", 2)
+    result = tool_fns["md_get_candles"]("PETR4", "D", "last", 2)
     assert len(result) == 2
     assert result[0].high == 38.7
     # timeTrade no fixture é yyyyMMddHHmm numérico (202607071730) — precisa continuar
@@ -109,7 +109,7 @@ def test_md_get_candles_last(tool_fns: dict) -> None:
 
 
 @respx.mock
-def test_md_get_candles_last_parses_the_real_string_time_format(tool_fns: dict) -> None:
+def test_md_get_candles_parses_the_real_string_time_format(tool_fns: dict) -> None:
     """A API real manda `timeTrade` como string legível ("Sep 15, 2026 12:00:00 AM"), não
     como número — descoberto ao vivo (Claude Desktop bateu em produção e a validação
     Pydantic rejeitava com `float_parsing` antes desta correção)."""
@@ -129,7 +129,7 @@ def test_md_get_candles_last_parses_the_real_string_time_format(tool_fns: dict) 
             ],
         )
     )
-    result = tool_fns["md_get_candles_last"]("PETR4", "D", 1)
+    result = tool_fns["md_get_candles"]("PETR4", "D", "last", 1)
     assert result[0].timeTrade == datetime(2026, 9, 15, 0, 0, 0)
 
 
@@ -151,12 +151,14 @@ def test_md_get_book_variants(tool_fns: dict) -> None:
 
 
 @respx.mock
-def test_md_get_trades_range(tool_fns: dict) -> None:
+def test_md_get_trades(tool_fns: dict) -> None:
     respx.post(f"{BASE_URL}/SignIn").mock(return_value=_SIGNIN_OK)
     respx.get(
         f"{BASE_URL}/services/quotes/quoteTimesTrade/PETR4/1/1000/0/20260101/20260107"
     ).mock(return_value=httpx.Response(200, json=load_fixture("trades.json")))
-    result = tool_fns["md_get_trades_range"]("PETR4", 1, 1000, 0, "20260101", "20260107")
+    result = tool_fns["md_get_trades"](
+        "PETR4", start="20260101", end="20260107", indicator=1, limit=1000, offset=0
+    )
     assert result[0].preco == "38.50"
     assert result[0].quantidade == 100
 
@@ -172,25 +174,25 @@ def test_md_get_player_ranking(tool_fns: dict) -> None:
 
 
 @respx.mock
-def test_md_get_gainers(tool_fns: dict) -> None:
+def test_md_get_movers_gainers(tool_fns: dict) -> None:
     respx.post(f"{BASE_URL}/SignIn").mock(return_value=_SIGNIN_OK)
     respx.get(f"{BASE_URL}/services/quotes/highList/IBOV").mock(
         return_value=httpx.Response(200, json=load_fixture("highlist.json"))
     )
-    result = tool_fns["md_get_gainers"]("IBOV")
+    result = tool_fns["md_get_movers"]("IBOV", "gainers")
     assert result[0].quote == "MGLU3"
     assert result[0].change == 7.36
 
 
 @respx.mock
-def test_news_get_last(tool_fns: dict) -> None:
+def test_news_search_last(tool_fns: dict) -> None:
     respx.post(f"{BASE_URL}/connect/token").mock(
         return_value=httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
     )
     respx.get(f"{BASE_URL}/services/news/newsLast/5").mock(
         return_value=httpx.Response(200, json=load_fixture("newslast.json"))
     )
-    result = tool_fns["news_get_last"](5)
+    result = tool_fns["news_search"](count=5)
     assert result[0].code == "1070292"
     assert result[0].title == "Ibovespa fecha em alta"
 
@@ -203,7 +205,7 @@ def test_news_search_maps_missing_endpoint(tool_fns: dict) -> None:
     route = respx.get(
         f"{BASE_URL}/services/news/newsQuery/01012026/07012026/dividendos"
     ).mock(return_value=httpx.Response(200, json=[]))
-    tool_fns["news_search"]("01012026", "07012026", "dividendos")
+    tool_fns["news_search"](start="01012026", end="07012026", keyword="dividendos")
     assert route.called
 
 

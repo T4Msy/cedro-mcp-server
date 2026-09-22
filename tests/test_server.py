@@ -21,25 +21,20 @@ EXPECTED_TOOLS = {
     "md_get_company_quotes",
     "md_list_options",
     # candles
-    "md_get_candles_last",
-    "md_get_candles_range",
+    "md_get_candles",
     # book
     "md_get_book",
     # trades
-    "md_get_trades_range",
-    "md_get_trades_date",
+    "md_get_trades",
     # rankings / volume / movers
     "md_get_player_ranking",
     "md_get_cross_ranking",
     "md_get_volume_at_price",
-    "md_get_gainers",
-    "md_get_losers",
-    # news (inclui os 3 antes ausentes)
-    "news_get_last",
+    "md_get_movers",
+    # news (consolidado de 9 para 3 — ver docs/arquitetura/07-tools-consolidation.md)
+    "news_search",
     "news_get_by_code",
     "news_list_agencies",
-    "news_search",
-    "news_relevant_facts_by_agency",
     # streaming (Fase 2)
     "stream_get_quote",
     "stream_get_book",
@@ -63,10 +58,11 @@ def test_all_expected_tools_registered(settings: Settings, client: CedroClient) 
 def test_tool_count_matches_blueprint_scope(settings: Settings, client: CedroClient) -> None:
     mcp = _server(settings, client)
     names = {t.name for t in asyncio.run(mcp.list_tools())}
-    # REST: 17 de cotações/candles/book/negócios/rankings + 9 de notícias; Trading: 6;
+    # REST: 14 de cotações/candles/book/negócios/rankings (consolidado de 17) + 3 de
+    # notícias (consolidado de 9, ver docs/arquitetura/07-tools-consolidation.md); Trading: 6;
     # Fase 2: 5 tools de streaming via Socket Crystal/cache.
-    assert len([n for n in names if n.startswith("md_")]) == 17
-    assert len([n for n in names if n.startswith("news_")]) == 9
+    assert len([n for n in names if n.startswith("md_")]) == 14
+    assert len([n for n in names if n.startswith("news_")]) == 3
     assert len([n for n in names if n.startswith("trading_")]) == 6
     assert len([n for n in names if n.startswith("stream_")]) == 5
 

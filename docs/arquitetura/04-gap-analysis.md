@@ -17,7 +17,7 @@ precisa de uma decisão de negócio ou de outro sistema da Cedro — é a pauta 
 | Interpolação sem encoding em `news_search`/`md_get_quote` | Corrigido |
 | README/docs com contagem de testes desatualizada (54 vs. 68) | Corrigido |
 | `PerUserCredentialProvider` como stub, não implementação real | **Não fechado nesta rodada** — próximo passo técnico direto, sem dependência externa |
-| Consolidação de 26 → ~13-15 tools | **Não fechado nesta rodada** — ver `07-tools-consolidation.md`, é refactor, não saneamento |
+| Consolidação de 26 → ~15 tools | **Fechado em 22/09** — 26 → 17 (o alvo original era ~15; ver `07-tools-consolidation.md` para o porquê da diferença). Testes e docs atualizados. |
 | Validação contra a API real (`scripts/smoke_live.py`) | **Não fechado nesta rodada**, por escolha explícita — falta credencial de sandbox |
 
 ## Falta na Cedro (pauta de Saulo/Adriel, não resolvível pelo MCP sozinho)
@@ -31,7 +31,7 @@ Atualizado em 21/09 com respostas diretas do usuário — ver histórico da sess
 | Se a API key é emitida pelo IAM ou por um store próprio do MCP | **Parado junto com o IAM** (item acima) — é pergunta-irmã, mesma decisão de adiar. |
 | Cota por tier (20k/100k/500k req/mês) sem sistema/dono | **Sem prazo, por escolha do usuário** — "isso é quando eu quiser". Não é bloqueio nem pauta urgente; fica registrado como pendência sem dono, para quando ele decidir priorizar. |
 | Ausência de regra de redistribuição/display-vs-non-display | **Fechado — não se aplica.** O usuário confirmou: "nem vai ter, isso é pelo Market Data" — ou seja, essa responsabilidade já é coberta pelo contrato/termos da própria Market Data (o cliente que redistribui já está sujeito às regras dela), não é algo que o MCP precisa resolver ou que crie uma obrigação nova. Removida a marcação **REQUIRES LEGAL/COMMERCIAL VALIDATION** — ver `03-commercial-entitlement.md`. |
-| Escopo do streaming (F2) | **Implementado** sobre Socket Crystal TCP: handshake, framing, cache incremental de `T:`/`Z:`/`V:` e cinco tools `stream_*`. Falta validar com credencial real. |
+| Escopo do streaming (F2) | **Implementado e validado ao vivo em 22/09** sobre Socket Crystal TCP de produção (`datafeed1/datafeed2:81`): handshake, framing e `stream_get_quote` confirmados com PETR4 real via o conector MCP. `stream_get_book`/`stream_get_tape` ainda não tiveram sessão ao vivo dedicada. |
 | Limite de conexões simultâneas do Market Data ao ter múltiplos clientes com sessão própria | **Objetivo aplicado à Fase 2 dentro de um processo:** o registro usa hash da credencial Socket, então tokens/abas com a mesma conta compartilham uma conexão. Continua pendente a regra numérica da Cedro e o mecanismo compartilhado caso haja mais de uma réplica. |
 
 Documentação REST (não Socket) sobre limite de conexões: não existe nota equivalente à de Socket

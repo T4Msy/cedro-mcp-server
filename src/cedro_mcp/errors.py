@@ -34,3 +34,10 @@ class CedroHTTPError(CedroError):
 
 class CedroStreamError(CedroError):
     """Falha de conexão, autenticação ou snapshot do Socket Crystal."""
+
+
+class CedroValidationError(CedroError):
+    """Combinação de parâmetros inválida numa tool consolidada (ex.: `mode` exige outro campo).
+
+    Erro do lado do chamador, antes de qualquer chamada à API da Cedro — não é HTTP nem auth.
+    """

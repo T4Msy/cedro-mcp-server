@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from ..auth.entitlements import require_scope
 from ..auth.scopes import MARKETDATA_READ
@@ -49,20 +49,12 @@ def register(mcp: "FastMCP", client: "CedroClient") -> None:
 
     @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
     @require_scope(MARKETDATA_READ)
-    def md_get_gainers(index: str) -> list[MoverItem]:
-        """Top ativos em alta de um índice (gainers).
+    def md_get_movers(index: str, direction: Literal["gainers", "losers"] = "gainers") -> list[MoverItem]:
+        """Top ativos em alta ou baixa de um índice.
 
-        Top gainers of an index. GET /services/quotes/highList/{index}
+        Top gainers/losers of an index.
+        GET /services/quotes/highList/{index} (gainers) ou /fallList/{index} (losers)
         """
-        data = client.get_quotes(f"/services/quotes/highList/{index}")
-        return parse_list(data, MoverItem)
-
-    @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
-    @require_scope(MARKETDATA_READ)
-    def md_get_losers(index: str) -> list[MoverItem]:
-        """Top ativos em baixa de um índice (losers).
-
-        Top losers of an index. GET /services/quotes/fallList/{index}
-        """
-        data = client.get_quotes(f"/services/quotes/fallList/{index}")
+        path = "highList" if direction == "gainers" else "fallList"
+        data = client.get_quotes(f"/services/quotes/{path}/{index}")
         return parse_list(data, MoverItem)

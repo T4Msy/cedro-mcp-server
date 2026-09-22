@@ -4,11 +4,11 @@
 
 O servidor MCP expõe três superfícies da Cedro para IAs:
 
-- **Market Data REST:** 26 tools somente-leitura para cotações, candles, livro, negócios, rankings e notícias.
+- **Market Data REST:** 17 tools somente-leitura para cotações, candles, livro, negócios, rankings e notícias (consolidado de 26 em 22/09, ver `docs/arquitetura/07-tools-consolidation.md`).
 - **Streaming Socket Crystal (Fase 2):** 5 tools `stream_*` para cotação, livro agregado, fita, cancelamento de assinatura e status. Uma conexão TCP é compartilhada por hash de credencial Socket dentro do processo; o cache nunca é compartilhado entre contas.
 - **Trading (Fase 1):** 2 tools de consulta e 4 ferramentas de ação protegidas por `preview → confirm`, com token de uso único.
 
-Há 139 testes automatizados para autenticação, escopos, REST, Socket Crystal/cache, login web e Trading; `ruff check .` está limpo.
+Há 145 testes automatizados para autenticação, escopos, REST, Socket Crystal/cache, login web e Trading; `ruff check .` está limpo.
 
 ## Limites e proteções relevantes
 
@@ -20,14 +20,29 @@ Há 139 testes automatizados para autenticação, escopos, REST, Socket Crystal/
 
 ## Validação pendente
 
-A Fase 2 está validada com transporte fake/fixtures, mas ainda não contra o Socket Crystal real. O gate requer:
+A Fase 2 foi validada ao vivo em 22/09 contra o Socket Crystal real de **produção**
+(`datafeed1.cedrotech.com,datafeed2.cedrotech.com:81`), no deploy Hostinger VPS
+(`docs/arquitetura/09-deploy-hostinger-cloudflare.md`): handshake completo e cotação de PETR4
+consumida com sucesso pelo conector via `stream_get_quote`. A credencial de Socket usada é a mesma
+família de homologação/certificação da conta de teste — funciona em produção mesmo assim.
 
-1. Host/porta Crystal de homologação ou produção (`crystalhomologacao.cedrotech.com:81` ou `datafeed1/datafeed2:81`).
-2. Credencial Socket de teste, distinta da REST.
-3. Confirmação ao vivo do handshake e das mensagens `T:`, `Z:` e `V:`, em especial a semântica dos campos da fita.
-4. Confirmação do limite numérico de conexões por conta antes de qualquer escala horizontal.
+Ainda em aberto:
 
-Trading também permanece bloqueado para uso real até executar o harness de homologação descrito em `docs/arquitetura/10-trading-auth.md`.
+1. Confirmação do limite numérico de conexões simultâneas por conta antes de qualquer escala
+   horizontal (pauta da Cedro, não técnica — ver `docs/arquitetura/04-gap-analysis.md`).
+2. `md_get_book`/`stream_get_book` e a fita (`stream_get_tape`) ainda não tiveram uma sessão ao vivo
+   dedicada — só `quote` foi confirmado até agora.
+
+O ambiente de **certificação/homologação** (`wfcertificacao.cedrotech.com`,
+`crystalhomologacao.cedrotech.com:81`) está inacessível a partir do IP da VPS
+(`2.25.196.22`) — confirmado com diagnóstico de rede em 22/09 (TCP SYN descartado
+silenciosamente, assinatura de firewall por allowlist de IP, não instabilidade de rota). Trading
+usa exatamente esses hosts e por isso segue bloqueado — ver a seção sobre Trading abaixo.
+
+Trading permanece bloqueado para uso real: a credencial OMS atual é de certificação (confirmado —
+`brokerServiceLogin` responde 401 vazio contra produção) e o host de certificação está inacessível
+da VPS. Falta liberação de IP da Cedro para `2.25.196.22` **ou** uma credencial de Trading de
+produção. Ver também `docs/arquitetura/10-trading-auth.md`.
 
 ## Fora do escopo atual
 

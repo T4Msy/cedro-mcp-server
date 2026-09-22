@@ -17,8 +17,8 @@ from cedro_mcp.server import build_server
 from ._principal import as_principal
 from .conftest import BASE_URL
 
-MARKET_TOOLS = 17
-NEWS_TOOLS = 9
+MARKET_TOOLS = 14
+NEWS_TOOLS = 3
 #: 2 leitura (trading_list_orders_today, trading_get_order_history) + 4 escrita
 #: (preview_order, preview_cancel_order, preview_edit_order, confirm).
 TRADING_TOOLS = 6
@@ -74,7 +74,7 @@ def test_news_tool_denied_without_news_scope(settings: Settings, client: CedroCl
     fns = _fns(build_server(settings=settings, client=client))
     with as_principal(MARKETDATA_READ):
         with pytest.raises(CedroEntitlementError, match="marketdata:news"):
-            fns["news_get_last"](5)
+            fns["news_search"](count=5)
 
 
 def test_market_tool_denied_without_read_scope(settings: Settings, client: CedroClient) -> None:

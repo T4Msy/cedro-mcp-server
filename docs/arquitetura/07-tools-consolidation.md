@@ -1,4 +1,9 @@
-# Tools — consolidação (trabalho futuro, não desta rodada)
+# Tools — consolidação (feito em 22/09)
+
+> **Status:** implementado. 26 → 17 tools (o plano original mirava ~15; `md_get_trades` e
+> `news_search` ganharam mais parâmetros opcionais do que o previsto pra cobrir todos os modos sem
+> perder cobertura, então o total real ficou em 17 — ainda uma redução de 35%). Testes atualizados
+> (145 no total). Ver `src/cedro_mcp/tools/{candles,trades,rankings,news}.py`.
 
 ## O problema
 

@@ -1,8 +1,6 @@
 """Tools de notícias — Market Data REST (auth OAuth2 Bearer própria).
 
 News tools. Datas no formato ``DDMMYYYY`` ou ``DDMMYYYYHHMMSS``.
-Inclui os 3 endpoints antes ausentes no vault: newsAgency, newsQuery,
-newsRelevantFactsByAgency (ver Gap Analysis).
 """
 
 from __future__ import annotations
@@ -14,6 +12,7 @@ from pydantic import Field
 
 from ..auth.entitlements import require_scope
 from ..auth.scopes import MARKETDATA_NEWS
+from ..errors import CedroValidationError
 from ..models import NewsAgency, NewsArticle, NewsItem
 from ._helpers import READ_ONLY_ANNOTATIONS, parse_list, parse_one
 
@@ -32,12 +31,63 @@ Count = Annotated[int, Field(gt=0, le=100)]
 def register(mcp: "FastMCP", client: "CedroClient") -> None:
     @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
     @require_scope(MARKETDATA_NEWS)
-    def news_get_last(count: Count) -> list[NewsItem]:
-        """Últimas N notícias (limite de 100).
+    def news_search(
+        count: Count | None = None,
+        start: DateStr | None = None,
+        end: DateStr | None = None,
+        keyword: str | None = None,
+        agency_codes: str | None = None,
+        symbol: str | None = None,
+        relevant_facts: bool = False,
+    ) -> list[NewsItem]:
+        """Busca notícias — últimas N, por período, por agência, por palavra-chave ou por
+        fatos relevantes.
 
-        Last N news (max 100). GET /services/news/newsLast/{count}
+        Modos, na ordem de precedência:
+        - `count` sozinho: últimas N notícias (max 100).
+        - `relevant_facts=True` + `start`/`end` (+ opcional `symbol` OU `agency_codes`): fatos
+          relevantes do período, de um ativo, ou de uma/mais agências (`agency_codes`
+          separados por vírgula, ex. "3,4").
+        - `keyword` + `start`/`end`: busca por palavra-chave no período.
+        - `agency_codes` sozinho (sem datas): notícias de uma agência.
+        - `start`/`end` sozinhos: notícias do período.
+
+        GET /services/news/newsLast/{count}
+        GET /services/news/newsRelevantFacts[ByQuote|ByAgency]/{start}/{end}[/...]
+        GET /services/news/newsQuery/{start}/{end}/{keyword}
+        GET /services/news/newsByAgency/{agency_code}
+        GET /services/news/newsByDate/{start}/{end}
         """
-        data = client.get_news(f"/services/news/newsLast/{count}")
+        if count is not None and start is None and end is None and keyword is None:
+            data = client.get_news(f"/services/news/newsLast/{count}")
+        elif relevant_facts:
+            if not start or not end:
+                raise CedroValidationError("relevant_facts=True exige `start` e `end`.")
+            if symbol:
+                data = client.get_news(
+                    f"/services/news/newsRelevantFactsByQuote/{start}/{end}/{symbol}"
+                )
+            elif agency_codes:
+                data = client.get_news(
+                    "/services/news/newsRelevantFactsByAgency/"
+                    f"{start}/{end}/{quote(agency_codes, safe=',')}"
+                )
+            else:
+                data = client.get_news(f"/services/news/newsRelevantFacts/{start}/{end}")
+        elif keyword is not None:
+            if not start or not end:
+                raise CedroValidationError("`keyword` exige `start` e `end`.")
+            data = client.get_news(
+                f"/services/news/newsQuery/{start}/{end}/{quote(keyword, safe='')}"
+            )
+        elif agency_codes is not None and start is None and end is None:
+            data = client.get_news(f"/services/news/newsByAgency/{quote(agency_codes, safe='')}")
+        elif start and end:
+            data = client.get_news(f"/services/news/newsByDate/{start}/{end}")
+        else:
+            raise CedroValidationError(
+                "Informe `count`, `start`+`end`, `keyword`+`start`+`end`, ou `agency_codes`."
+            )
         return parse_list(data, NewsItem)
 
     @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
@@ -52,53 +102,6 @@ def register(mcp: "FastMCP", client: "CedroClient") -> None:
 
     @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
     @require_scope(MARKETDATA_NEWS)
-    def news_by_date(start: DateStr, end: DateStr) -> list[NewsItem]:
-        """Notícias entre duas datas (DDMMYYYY[HHMMSS]).
-
-        News between two dates. GET /services/news/newsByDate/{start}/{end}
-        """
-        data = client.get_news(f"/services/news/newsByDate/{start}/{end}")
-        return parse_list(data, NewsItem)
-
-    @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
-    @require_scope(MARKETDATA_NEWS)
-    def news_by_agency(agency_code: str) -> list[NewsItem]:
-        """Notícias de uma agência específica (ex.: 3=Bovespa, 4=BMF).
-
-        News from an agency. GET /services/news/newsByAgency/{agency_code}
-        """
-        data = client.get_news(f"/services/news/newsByAgency/{quote(agency_code, safe='')}")
-        return parse_list(data, NewsItem)
-
-    @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
-    @require_scope(MARKETDATA_NEWS)
-    def news_relevant_facts(start: DateStr, end: DateStr) -> list[NewsItem]:
-        """Fatos relevantes por período (DDMMYYYY[HHMMSS], limite 100).
-
-        Material facts by period. GET /services/news/newsRelevantFacts/{start}/{end}
-        """
-        data = client.get_news(f"/services/news/newsRelevantFacts/{start}/{end}")
-        return parse_list(data, NewsItem)
-
-    @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
-    @require_scope(MARKETDATA_NEWS)
-    def news_relevant_facts_by_quote(
-        start: DateStr, end: DateStr, symbol: str
-    ) -> list[NewsItem]:
-        """Fatos relevantes de um ativo por período.
-
-        Material facts for an asset by period.
-        GET /services/news/newsRelevantFactsByQuote/{start}/{end}/{symbol}
-        """
-        data = client.get_news(
-            f"/services/news/newsRelevantFactsByQuote/{start}/{end}/{symbol}"
-        )
-        return parse_list(data, NewsItem)
-
-    # ---- endpoints antes ausentes no vault (Gap 1 da Gap Analysis) ----------
-
-    @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
-    @require_scope(MARKETDATA_NEWS)
     def news_list_agencies() -> list[NewsAgency]:
         """Lista as agências de notícias disponíveis.
 
@@ -106,34 +109,3 @@ def register(mcp: "FastMCP", client: "CedroClient") -> None:
         """
         data = client.get_news("/services/news/newsAgency")
         return parse_list(data, NewsAgency)
-
-    @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
-    @require_scope(MARKETDATA_NEWS)
-    def news_search(start: DateStr, end: DateStr, keyword: str) -> list[NewsItem]:
-        """Busca notícias por período que contenham uma palavra-chave.
-
-        Search news by period containing a keyword (title/description).
-        GET /services/news/newsQuery/{start}/{end}/{keyword}
-        """
-        data = client.get_news(
-            f"/services/news/newsQuery/{start}/{end}/{quote(keyword, safe='')}"
-        )
-        return parse_list(data, NewsItem)
-
-    @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
-    @require_scope(MARKETDATA_NEWS)
-    def news_relevant_facts_by_agency(
-        start: DateStr, end: DateStr, agency_codes: str
-    ) -> list[NewsItem]:
-        """Fatos relevantes de uma agência por período.
-
-        Material facts from an agency by period.
-        GET /services/news/newsRelevantFactsByAgency/{start}/{end}/{agency_codes}
-        """
-        # agency_codes é uma lista separada por vírgula (ex.: "3,4") — preserva a vírgula
-        # literal (é o separador esperado pela API), só escapa o resto (espaço, barra, etc.).
-        data = client.get_news(
-            "/services/news/newsRelevantFactsByAgency/"
-            f"{start}/{end}/{quote(agency_codes, safe=',')}"
-        )
-        return parse_list(data, NewsItem)

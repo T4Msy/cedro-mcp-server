@@ -23,7 +23,7 @@ from .sessions import NewsAuth, SessionAuth
 # Erros HTTP documentados para os endpoints REST (ver [[REST - MOC]] e nota `quote`).
 #
 # 401 é ambíguo na própria API (ver ERROS.md da skill market-data-rest, confirmado ao vivo com
-# md_get_gainers/md_get_losers falhando com o resto da sessão funcionando normalmente): pode ser
+# md_get_movers (gainers/losers) falhando com o resto da sessão funcionando normalmente): pode ser
 # sessão de verdade inválida, OU o produto/endpoint específico não estar provisionado no plano da
 # conta (o caso documentado é candleLast/candleDate, mas o padrão — funciona em tudo, 401 só num
 # endpoint — é o mesmo). client.py já reautentica 1x antes de propagar; se o 401 persiste depois

@@ -7,13 +7,14 @@ a instrução do servidor ainda dizem "cedro-market-data" — o rename pra "Cedr
 última etapa do roadmap (`docs/arquitetura/08-plano-por-fases.md`, Fase 4), não afeta
 funcionalidade.
 
-> **Status:** construído e testado com **mocks/fixtures** (139 testes). Market Data REST está em
+> **Status:** construído e testado com **mocks/fixtures** (145 testes). Market Data REST está em
 > produção pessoal (deploy real, ver `docs/arquitetura/09-deploy-hostinger-cloudflare.md`).
 > Trading tem cobertura de teste completa mas **nunca rodou contra a API real** — ver
 > `docs/arquitetura/10-trading-auth.md` antes de usar `trading_confirm` com dinheiro de verdade.
-> Streaming ainda precisa de uma credencial Socket Crystal de homologação para validação real antes
-> de ser ligado no deploy. Os endpoints documentados são `crystalhomologacao.cedrotech.com:81` e,
-> em produção, `datafeed1.cedrotech.com:81` com `datafeed2.cedrotech.com:81` como failover.
+> Streaming (Socket Crystal) foi **validado ao vivo em 22/09** contra produção
+> (`datafeed1.cedrotech.com,datafeed2.cedrotech.com:81`) — cotação de PETR4 consumida com sucesso
+> pelo conector. O host de homologação (`crystalhomologacao.cedrotech.com:81`) está inacessível a
+> partir do deploy atual — ver `docs/estado-atual-mcp-market-data.md`.
 > Arquitetura e decisões comerciais documentadas em `docs/arquitetura/`.
 
 ## Arquitetura
@@ -35,8 +36,8 @@ funcionalidade.
 
 | Escopo | Libera |
 |---|---|
-| `marketdata:read` | 17 tools: cotações, candles, book, negócios, rankings, altas/baixas |
-| `marketdata:news` | 9 tools de notícias |
+| `marketdata:read` | 14 tools: cotações, candles, book, negócios, rankings, altas/baixas |
+| `marketdata:news` | 3 tools de notícias |
 | `marketdata:stream` | 5 tools de streaming: cotação, livro, fita, cancelamento e status |
 
 `marketdata:read` é exigido para conectar ao servidor. Nomes **provisórios** até a Cedro confirmar os
@@ -44,16 +45,20 @@ funcionalidade.
 
 ## Tools
 
-### Market Data REST (26, read-only)
+### Market Data REST (17, read-only)
+
+Consolidado de 26 → 17 tools em 22/09 (`docs/arquitetura/07-tools-consolidation.md`) — uma tool por
+operação que um humano pediria, com parâmetro de modo, em vez de uma tool por rota HTTP (padrão que já
+existia em `md_get_book`).
 
 | Grupo | Tools |
 |---|---|
 | Cotações & ativos | `md_get_quote`, `md_get_quote_info`, `md_list_markets`, `md_list_indices`, `md_get_index_assets`, `md_get_company_quotes`, `md_list_options` |
-| Candles | `md_get_candles_last`, `md_get_candles_range` |
+| Candles | `md_get_candles` (`mode="last"` com `count`, ou `mode="range"` com `start`/`end`) |
 | Book (DOM) | `md_get_book` (`full`/`aggregated`/`mini`) |
-| Negócios (fita) | `md_get_trades_range`, `md_get_trades_date` |
-| Rankings/Volume/Movers | `md_get_player_ranking`, `md_get_cross_ranking`, `md_get_volume_at_price`, `md_get_gainers`, `md_get_losers` |
-| Notícias | `news_get_last`, `news_get_by_code`, `news_by_date`, `news_by_agency`, `news_relevant_facts`, `news_relevant_facts_by_quote`, `news_list_agencies`, `news_search`, `news_relevant_facts_by_agency` |
+| Negócios (fita) | `md_get_trades` (`date` para o dia inteiro, ou `start`/`end` com paginação) |
+| Rankings/Volume/Movers | `md_get_player_ranking`, `md_get_cross_ranking`, `md_get_volume_at_price`, `md_get_movers` (`direction="gainers"`/`"losers"`) |
+| Notícias | `news_search` (últimas N, por período, agência, palavra-chave ou fatos relevantes), `news_get_by_code`, `news_list_agencies` |
 
 A documentação pública da skill `market-data-rest` também é exposta como **resources**
 `cedro-docs://index` e `cedro-docs://note/{token}` (nunca o vault interno).
@@ -156,7 +161,7 @@ e `CEDRO_OMS_ACCOUNT`/`CEDRO_OMS_LOGIN`/`CEDRO_OMS_PASSWORD`.
 ## Testes
 
 ```powershell
-pytest          # 139 testes: auth, entitlements, REST, Trading, Socket Crystal/cache e login — mockados
+pytest          # 145 testes: auth, entitlements, REST, Trading, Socket Crystal/cache e login — mockados
 ruff check .
 python scripts/smoke_live.py     # smoke REST real; pula sozinho sem credenciais
 ```

@@ -15,7 +15,7 @@ proposta de construção nova; é um inventário do que o discovery encontrou j�
 | Catálogo de tools por fase (F1–F5) | `API's Cedro/99-Roadmap/Especificacao do MCP Server (blueprint).md` | F1 (Market Data REST) é o que este MCP cobre |
 | Schemas Pydantic de resposta | `src/cedro_mcp/models.py` | Pronto, cobre os 26 endpoints atuais |
 | Rate limit por token | `src/cedro_mcp/http_app.py` (middleware ASGI) | Pronto — em memória, por processo (ver `02-security-model.md`) |
-| CI / lint / testes | `.github/`, `pyproject.toml`, `tests/` (139 testes) | Pronto |
+| CI / lint / testes | `.github/`, `pyproject.toml`, `tests/` (145 testes) | Pronto |
 | Deploy (Docker + Render) | `Dockerfile`, `Market Data/render.yaml`, `Market Data/DEPLOY-RENDER.md` | Existe mas apontava para a cópia errada — corrigido nesta rodada |
 
 ## O que não existe e precisa ser construído (fora desta rodada)
