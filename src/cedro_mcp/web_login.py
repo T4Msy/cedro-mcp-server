@@ -63,9 +63,12 @@ if TYPE_CHECKING:
 _FLOW_TTL = 600.0
 #: RFC 6749 recomenda curto — o code é trocado por um token imediatamente após o POST.
 _CODE_TTL = 300.0
-#: Sem refresh token nesta v1 (ver módulo) — expira, o cliente reabre a aba e refaz o login.
-_ACCESS_TOKEN_TTL = 60 * 60 * 24 * 30  # 30 dias
-#: Cliente registrado por DCR — longo: o token emitido para ele vale 30 dias.
+#: Access token curto + refresh token rotativo: o cliente MCP renova sozinho, sem abrir a aba.
+_ACCESS_TOKEN_TTL = 60 * 60 * 24 * 7  # 7 dias
+#: Sem uso por 90 dias, a pessoa refaz o login pela aba. Cada uso gera um refresh novo
+#: (rotação) e invalida o anterior — um refresh vazado e já usado não serve mais.
+_REFRESH_TOKEN_TTL = 60 * 60 * 24 * 90
+#: Cliente registrado por DCR — mais longo que o refresh token (90 dias) emitido para ele.
 _CLIENT_TTL = 60 * 60 * 24 * 400
 
 _CLIENT_KEY = "oauth:client:"
@@ -74,6 +77,8 @@ _CODE_KEY = "oauth:code:"
 _CODE_CREDS_KEY = "oauth:code-creds:"
 _TOKEN_KEY = "oauth:token:"
 _CREDS_KEY = "oauth:creds:"
+_REFRESH_KEY = "oauth:refresh:"
+_REFRESH_CREDS_KEY = "oauth:refresh-creds:"
 
 
 @dataclass
@@ -254,37 +259,93 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         bundle = self._open_bundle(raw_bundle)
         if bundle is None:
             raise TokenError("invalid_grant", "Código de autorização inválido, expirado ou já usado.")
-        token = secrets.token_urlsafe(32)
         subject = (bundle.rest or bundle.socket or bundle.trading)
+        return await call(
+            self._store,
+            self._issue_tokens,
+            authorization_code.client_id,
+            authorization_code.scopes,
+            subject.user if subject else None,
+            bundle,
+        )
+
+    def _issue_tokens(
+        self,
+        client_id: str,
+        scopes: list[str],
+        subject: str | None,
+        bundle: CedroCredentialBundle,
+    ) -> OAuthToken:
+        """Emite access + refresh. Cada um guarda a própria cópia (cifrada) das credenciais:
+        o access expira antes do refresh, e o refresh precisa delas para emitir o próximo."""
+        now = int(time.time())
+        token = secrets.token_urlsafe(32)
+        refresh = secrets.token_urlsafe(32)
         access = AccessToken(
             token=token,
-            client_id=authorization_code.client_id,
-            scopes=authorization_code.scopes,
-            expires_at=int(time.time()) + _ACCESS_TOKEN_TTL,
-            subject=subject.user if subject else None,
+            client_id=client_id,
+            scopes=scopes,
+            expires_at=now + _ACCESS_TOKEN_TTL,
+            subject=subject,
         )
-        await call(self._store, self._put_bundle, _CREDS_KEY + hash_key(token), bundle,
-                   _ACCESS_TOKEN_TTL)
-        await call(
-            self._store,
-            self._put,
+        self._put_bundle(_CREDS_KEY + hash_key(token), bundle, _ACCESS_TOKEN_TTL)
+        self._put(
             _TOKEN_KEY + hash_key(token),
             access.model_dump_json(exclude={"token"}).encode(),
             _ACCESS_TOKEN_TTL,
+        )
+        refresh_record = {
+            "client_id": client_id,
+            "scopes": scopes,
+            "expires_at": now + _REFRESH_TOKEN_TTL,
+            "subject": subject,
+            # Para derrubar o access antigo quando este refresh for usado (rotação).
+            "access_hash": hash_key(token),
+        }
+        self._put_bundle(_REFRESH_CREDS_KEY + hash_key(refresh), bundle, _REFRESH_TOKEN_TTL)
+        self._put(
+            _REFRESH_KEY + hash_key(refresh),
+            json.dumps(refresh_record).encode(),
+            _REFRESH_TOKEN_TTL,
         )
         return OAuthToken(
             access_token=token,
             token_type="Bearer",
             expires_in=_ACCESS_TOKEN_TTL,
-            scope=" ".join(authorization_code.scopes),
+            scope=" ".join(scopes),
+            refresh_token=refresh,
         )
 
-    # ---- Sem refresh token nesta v1 — ver docstring do módulo -----------------------
+    # ---- Refresh token rotativo --------------------------------------------------------
+
+    def _load_refresh(self, refresh_token: str) -> dict[str, Any] | None:
+        raw = self._store.get(_REFRESH_KEY + hash_key(refresh_token))
+        return json.loads(raw) if raw else None
 
     async def load_refresh_token(
         self, client: OAuthClientInformationFull, refresh_token: str
     ) -> RefreshToken | None:
-        return None
+        record = await call(self._store, self._load_refresh, refresh_token)
+        if record is None or record["client_id"] != client.client_id:
+            return None
+        return RefreshToken(
+            token=refresh_token,
+            client_id=record["client_id"],
+            scopes=record["scopes"],
+            expires_at=record["expires_at"],
+        )
+
+    def _rotate(self, refresh_token: str, scopes: list[str]) -> OAuthToken:
+        refresh_hash = hash_key(refresh_token)
+        raw_record = self._store.pop(_REFRESH_KEY + refresh_hash)
+        bundle = self._open_bundle(self._store.pop(_REFRESH_CREDS_KEY + refresh_hash))
+        if raw_record is None or bundle is None:
+            raise TokenError("invalid_grant", "Refresh token inválido, expirado ou já usado.")
+        record = json.loads(raw_record)
+        # O access emitido junto com este refresh deixa de valer.
+        self._store.delete(_TOKEN_KEY + record["access_hash"])
+        self._store.delete(_CREDS_KEY + record["access_hash"])
+        return self._issue_tokens(record["client_id"], scopes, record.get("subject"), bundle)
 
     async def exchange_refresh_token(
         self,
@@ -292,10 +353,7 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         refresh_token: RefreshToken,
         scopes: list[str],
     ) -> OAuthToken:
-        raise TokenError(
-            "unsupported_grant_type",
-            "Refresh token não suportado — reabra a aba de login quando o acesso expirar.",
-        )
+        return await call(self._store, self._rotate, refresh_token.token, scopes)
 
     async def load_access_token(self, token: str) -> AccessToken | None:
         entry = await call(self._store, self._load_access_token, token)
@@ -307,7 +365,14 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         return entry
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
-        await call(self._store, self._forget_token, token.token)
+        if isinstance(token, RefreshToken):
+            await call(self._store, self._forget_refresh, token.token)
+        else:
+            await call(self._store, self._forget_token, token.token)
+
+    def _forget_refresh(self, refresh_token: str) -> None:
+        self._store.delete(_REFRESH_KEY + hash_key(refresh_token))
+        self._store.delete(_REFRESH_CREDS_KEY + hash_key(refresh_token))
 
     # ---- Nossa página de login, montada como rotas Starlette extras -----------------
 

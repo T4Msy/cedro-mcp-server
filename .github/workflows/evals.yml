@@ -1,0 +1,41 @@
+name: Evals (comportamento do modelo)
+
+# Manual: custa tokens da API da Claude. Rode depois de mudar descrição de tool, instruções do
+# servidor ou guardrails. Requer o secret ANTHROPIC_API_KEY no repositório.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Modelo avaliado"
+        default: "claude-opus-5"
+      scenarios:
+        description: "Cenários (separados por espaço; vazio = todos)"
+        default: ""
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev,evals]"
+
+      - name: Run evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CEDRO_EVAL_MODEL: ${{ inputs.model }}
+          # Via env, nunca interpolado direto no script (evita injeção pelo input).
+          SCENARIOS: ${{ inputs.scenarios }}
+        run: python -m evals.run $SCENARIOS
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: evals/results/

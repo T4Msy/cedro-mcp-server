@@ -58,5 +58,6 @@ def register(mcp: "FastMCP") -> None:
             "`warnings` exatamente como vieram.\n"
             "4. Pergunte explicitamente se pode enviar. Só chame trading_confirm com o "
             "confirmation_token depois de um 'sim' claro nesta conversa, agora.\n"
-            "5. Depois do confirm, confira o status real com trading_list_orders_today."
+            "5. Depois do confirm, use trading_wait_order_status com o clordid e diga ao "
+            "usuário o que de fato aconteceu (executada, aberta ou rejeitada e por quê)."
         )

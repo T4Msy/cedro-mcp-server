@@ -57,6 +57,20 @@ mostrando a canônica versionada.
 Executar o refactor descrito em `07-tools-consolidation.md` (26 → ~15 tools) como mudança
 deliberada e isolada, com seu próprio ciclo de revisão — não misturada às fases anteriores.
 
+## Fase 5 — Operação e produto (23/09, concluída)
+
+- [x] Concorrência (tools fora do event loop, pool de sessões com SignIn único), token de
+  confirmação amarrado ao dono, logs e auditoria.
+- [x] Guardrails no preview, resumo do dia, prompts, referência de Trading, saída tipada.
+- [x] Redis opcional (rate limit, confirmações, login, cota), `/health`, métricas Prometheus, cota
+  por plano, deploy com Redis na VPS.
+- [x] Indicadores e comparação calculados no servidor, modos resumo, acompanhamento de ordem,
+  auditoria persistente com `trading_get_audit`, refresh token rotativo.
+- [x] Rename para **Cedro Connect IA** (nome do servidor; pacote/imagem mantidos).
+- [x] Evals de comportamento do modelo (`evals/`), alertas e painel (`ops/`).
+- [ ] Rodar os evals com uma chave da Anthropic e revisar o relatório.
+- [ ] Túnel nomeado ou domínio próprio (URL estável).
+
 ## Fora deste plano
 
 - Conta/Análise e Cadastro/Backoffice seguem como MCPs separados; o isolamento por produto/contrato

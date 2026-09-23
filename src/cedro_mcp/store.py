@@ -7,7 +7,8 @@ O que mora aqui — tudo que precisa sobreviver a restart ou ser visto por outra
 - rate limit (janela deslizante por token e por IP) — ``http_app.py``;
 - tokens de confirmação de Trading — ``trading/confirmation.py``;
 - clientes OAuth, flows, códigos e tokens do login pelo navegador — ``web_login.py``;
-- contadores de cota mensal por plano — ``quota.py``.
+- contadores de cota mensal por plano — ``quota.py``;
+- trilha de auditoria de Trading (log só-de-anexar) — ``observability.py``.
 
 O que **não** mora aqui, de propósito: as sessões downstream (``JSESSIONID``/``httpx.Client`` de
 ``session_pool.py``) e o conector Socket. São objetos vivos de conexão, locais ao processo; cada
@@ -63,6 +64,14 @@ class Store(Protocol):
         """Registra um hit numa janela deslizante e devolve quantos há dentro dela."""
         ...
 
+    def append_log(self, key: str, entry: bytes, maxlen: int) -> None:
+        """Acrescenta a um log só-de-anexar, guardando no máximo ``maxlen`` entradas."""
+        ...
+
+    def read_log(self, key: str, count: int) -> list[bytes]:
+        """Últimas ``count`` entradas do log, da mais recente para a mais antiga."""
+        ...
+
     def ping(self) -> bool: ...
 
 
@@ -83,6 +92,7 @@ class MemoryStore:
         self._lock = threading.Lock()
         self._values: dict[str, tuple[bytes, float | None]] = {}
         self._windows: dict[str, deque[float]] = {}
+        self._logs: dict[str, deque[bytes]] = {}
         self._last_sweep = float("-inf")
 
     def _expired(self, expires_at: float | None) -> bool:
@@ -142,6 +152,18 @@ class MemoryStore:
                 self._drop_empty_windows(now, window)
                 self._last_sweep = now
             return len(hits)
+
+    def append_log(self, key: str, entry: bytes, maxlen: int) -> None:
+        with self._lock:
+            log = self._logs.get(key)
+            if log is None or log.maxlen != maxlen:
+                log = self._logs[key] = deque(log or (), maxlen=maxlen)
+            log.append(entry)
+
+    def read_log(self, key: str, count: int) -> list[bytes]:
+        with self._lock:
+            log = self._logs.get(key)
+            return list(reversed(log))[:count] if log else []
 
     def window_keys(self) -> int:
         """Quantos buckets de janela estão vivos (para testes/diagnóstico)."""
@@ -220,6 +242,14 @@ class RedisStore:
         pipe.expire(k, max(int(window) + 1, 1))
         _, _, count, _ = pipe.execute()
         return int(count)
+
+    def append_log(self, key: str, entry: bytes, maxlen: int) -> None:
+        # Redis Stream com corte aproximado (~): barato e mantém ~maxlen entradas.
+        self._redis.xadd(self._k(key), {"e": entry}, maxlen=maxlen, approximate=True)
+
+    def read_log(self, key: str, count: int) -> list[bytes]:
+        rows = self._redis.xrevrange(self._k(key), count=count)
+        return [fields[b"e"] for _, fields in rows]
 
     def ping(self) -> bool:
         try:

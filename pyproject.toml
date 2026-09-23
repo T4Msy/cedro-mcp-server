@@ -1,7 +1,7 @@
 [project]
 name = "cedro-mcp-server"
 version = "0.1.0"
-description = "MCP server exposing Cedro Market Data (REST F1) as AI tools"
+description = "Cedro Connect IA: MCP server exposing Cedro Market Data, streaming and Trading as AI tools"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -27,6 +27,8 @@ dependencies = [
 [project.optional-dependencies]
 # Estado compartilhado entre réplicas (MCP_REDIS_URL — ver store.py). A imagem Docker já instala.
 redis = ["redis>=5"]
+# Evals de comportamento do modelo (python -m evals.run) — chamam a API da Claude.
+evals = ["anthropic>=1.0"]
 dev = [
     "pytest>=8.0",
     "respx>=0.21",
@@ -50,7 +52,7 @@ build-backend = "hatchling.build"
 packages = ["src/cedro_mcp"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 
 [tool.ruff]

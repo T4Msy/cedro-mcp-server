@@ -231,7 +231,7 @@ def test_readonly_key_sees_only_market_tools_over_http(
     settings: Settings, client: CedroClient
 ) -> None:
     names = _list_tools_over_http(_auth_settings(settings), client, "k_read")
-    assert len(names) == 15  # 14 de market data + account_get_usage
+    assert len(names) == 17  # 16 de market data + account_get_usage
     assert not any(n.startswith("news_") for n in names)
 
 
@@ -241,5 +241,5 @@ def test_full_key_sees_all_tools_over_http(settings: Settings, client: CedroClie
         api_keys_raw="k_full:robo:marketdata:read|marketdata:news",
     )
     names = _list_tools_over_http(settings, client, "k_full")
-    assert len(names) == 18  # + 3 de notícias
+    assert len(names) == 20  # + 3 de notícias
     assert len([n for n in names if n.startswith("news_")]) == 3

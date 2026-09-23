@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import book, candles, news, quotes, rankings, streaming, trades
+from . import analysis, book, candles, news, quotes, rankings, streaming, trades
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from ..client import CedroClient
     from ..streaming import MarketDataStreamClient
 
-_MODULES = (quotes, candles, book, trades, rankings, news)
+_MODULES = (quotes, candles, analysis, book, trades, rankings, news)
 
 
 def register_all(

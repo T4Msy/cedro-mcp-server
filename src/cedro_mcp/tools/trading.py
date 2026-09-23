@@ -9,11 +9,15 @@ do que foi mostrado. Nenhuma tool de escrita aqui chama a API Cedro fora desse f
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
+
+from pydantic import Field
 
 from ..auth.entitlements import require_scope
 from ..auth.scopes import TRADING_READ
+from ..observability import read_own_audit
 from ..trading.day_summary import DaySummary, summarize_day
+from ..trading.order_watch import MAX_TIMEOUT, OrderWatchResult, watch_order
 from ._helpers import READ_ONLY_ANNOTATIONS
 from .trading_orders import register_order_tools
 
@@ -108,3 +112,44 @@ def _register_read_tools(mcp: "FastMCP", client: "TradingClient") -> None:
         """
         payload = client.daily_orders(f"/services/negotiation/dailyOrder/{account}/{market}")
         return summarize_day(payload, account=account, market=market)
+
+    @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+    @require_scope(TRADING_READ)
+    def trading_get_audit(limit: Annotated[int, Field(ge=1, le=200)] = 20) -> dict[str, Any]:
+        """Sua trilha de auditoria de Trading neste servidor, da mais recente para a mais antiga:
+        cada preview, confirmação, resultado do OMS, falha e confirmação rejeitada, com horário
+        (UTC) e o resumo da ordem. Responde "quem mandou essa ordem e quando?".
+
+        Mostra só os SEUS eventos. Não é o extrato da corretora: ordens enviadas por outros
+        canais (home broker, mesa) não aparecem — para elas use trading_list_orders_today.
+        """
+        events = read_own_audit(limit)
+        return {"events": events, "count": len(events)}
+
+    @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+    @require_scope(TRADING_READ)
+    def trading_wait_order_status(
+        account: str,
+        market: str,
+        clordid: str,
+        timeout_seconds: Annotated[float, Field(ge=0, le=MAX_TIMEOUT)] = 20,
+        expect_price: float | None = None,
+        expect_qty: float | None = None,
+    ) -> OrderWatchResult:
+        """Acompanha uma ordem por até `timeout_seconds` (máx. 60 s) até ela ficar conclusiva:
+        executada, cancelada, rejeitada ou expirada — com o texto do OMS em caso de rejeição.
+
+        Use logo depois de trading_confirm para dizer ao usuário o que REALMENTE aconteceu (o
+        retorno do confirm só diz que o OMS recebeu). Depois de uma EDIÇÃO, passe `expect_price`
+        e/ou `expect_qty` com os valores novos: conclui quando a ordem já os mostra (edição
+        aplicada) ou quando termina. `reached=false` com a ordem aberta não é falha — ela segue
+        no book. Consulta o dailyOrder a cada 2 s; não chame em loop.
+        """
+        path = f"/services/negotiation/dailyOrder/{account}/{market}"
+        return watch_order(
+            lambda: client.daily_orders(path),
+            clordid,
+            timeout=timeout_seconds,
+            expect_price=expect_price,
+            expect_qty=expect_qty,
+        )

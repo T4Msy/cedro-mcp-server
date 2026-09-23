@@ -8,6 +8,7 @@ from pydantic import Field
 
 from ..auth.entitlements import require_scope
 from ..auth.scopes import MARKETDATA_READ
+from ..analytics import TradesSummary, summarize_trades
 from ..errors import CedroValidationError
 from ..models import Trade
 from ._helpers import READ_ONLY_ANNOTATIONS, parse_list
@@ -39,11 +40,15 @@ def register(mcp: "FastMCP", client: "CedroClient") -> None:
         indicator: int = 1,
         limit: Limit = 1000,
         offset: int = 0,
-    ) -> list[Trade]:
+        summary: bool = False,
+    ) -> list[Trade] | TradesSummary:
         """Negócios realizados de um ativo (fita) — um dia inteiro ou um período.
 
         Passe `date` (yyyymmdd) para o dia inteiro, ou `start`/`end` (yyyymmdd ou
         yyyymmddHHmm) para um período com paginação (`indicator`: 1=trade, 0=any quote).
+        summary=True devolve só o agregado (quantidade de negócios, volume, VWAP, máxima/mínima,
+        maiores negócios e corretoras que mais compraram/venderam) — um dia inteiro pode ter
+        dezenas de milhares de negócios; prefira o resumo, a não ser que a lista seja pedida.
         GET /services/quotes/quoteTimesTradeDate/{symbol}/{date}
         GET /services/quotes/quoteTimesTrade/{symbol}/{indicator}/{limit}/{offset}/{start}/{end}
         """
@@ -57,4 +62,5 @@ def register(mcp: "FastMCP", client: "CedroClient") -> None:
             data = client.get_quotes(path)
         else:
             raise CedroValidationError("Informe `date`, ou `start` e `end`.")
-        return parse_list(data, Trade)
+        trades = parse_list(data, Trade)
+        return summarize_trades(trades) if summary else trades

@@ -1,0 +1,69 @@
+# Alertas do Cedro Connect IA. Limiares são pontos de partida — ajuste com o uso real.
+groups:
+  - name: cedro-connect-ia
+    rules:
+      - alert: CedroMcpDown
+        expr: up{job="cedro-mcp"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Cedro Connect IA não responde ao scrape
+          description: O /metrics de {{ $labels.instance }} não responde há 2 minutos.
+
+      # A conta Market Data tolera poucos logins por dia; rajada de SignIn pode bloqueá-la.
+      - alert: CedroSignInBurst
+        expr: sum by (api) (increase(cedro_mcp_signin_total[1h])) > 20
+        labels: {severity: warning}
+        annotations:
+          summary: Muitos SignIn em {{ $labels.api }} na última hora
+          description: >-
+            {{ $value | humanize }} logins em 1 h. Esperado: ~1 por usuário a cada 12 h por
+            réplica. Verifique reinícios em loop ou sessões sendo descartadas.
+
+      - alert: CedroSignInRefused
+        expr: sum by (api) (increase(cedro_mcp_signin_total{outcome="refused"}[15m])) > 3
+        labels: {severity: warning}
+        annotations:
+          summary: SignIn recusado repetidamente em {{ $labels.api }}
+          description: Credencial inválida ou conta bloqueada — cada tentativa gasta login da conta.
+
+      - alert: CedroUpstreamErrors
+        expr: |
+          sum by (api) (rate(cedro_mcp_upstream_requests_total{status=~"5..|error"}[10m]))
+            / sum by (api) (rate(cedro_mcp_upstream_requests_total[10m])) > 0.1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Mais de 10% de erro nas chamadas a {{ $labels.api }}
+          description: Falha de rede, timeout ou 5xx da Cedro.
+
+      - alert: CedroToolErrorRate
+        expr: |
+          sum(rate(cedro_mcp_tool_calls_total{outcome="error"}[15m]))
+            / sum(rate(cedro_mcp_tool_calls_total[15m])) > 0.25
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: Mais de 25% das chamadas de tool falhando
+          description: Veja cedro_mcp_tool_calls_total por tool e error_type.
+
+      - alert: CedroToolSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le, tool) (rate(cedro_mcp_tool_duration_seconds_bucket[15m]))) > 10
+        for: 15m
+        labels: {severity: info}
+        annotations:
+          summary: p95 de {{ $labels.tool }} acima de 10 s
+
+      - alert: CedroTradingConfirmFailures
+        expr: sum(increase(cedro_mcp_tool_calls_total{tool="trading_confirm",outcome="error"}[30m])) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: trading_confirm falhou
+          description: Ordem real não chegou ao OMS. Veja a trilha cedro_mcp.audit (trading_confirm_failed).
+
+      - alert: CedroQuotaExceeded
+        expr: sum by (plan) (increase(cedro_mcp_quota_exceeded_total[1h])) > 0
+        labels: {severity: info}
+        annotations:
+          summary: Clientes do plano {{ $labels.plan }} bateram a cota mensal

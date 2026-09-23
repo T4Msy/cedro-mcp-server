@@ -5,3 +5,6 @@ __pycache__/
 .ruff_cache/
 .env
 cd3_connector/
+
+# Relatórios dos evals (evals/run.py)
+evals/results/

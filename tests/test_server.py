@@ -22,6 +22,9 @@ EXPECTED_TOOLS = {
     "md_list_options",
     # candles
     "md_get_candles",
+    # análise (calculada no servidor)
+    "md_get_indicators",
+    "md_compare_assets",
     # book
     "md_get_book",
     # trades
@@ -61,9 +64,9 @@ def test_tool_count_matches_blueprint_scope(settings: Settings, client: CedroCli
     # REST: 14 de cotações/candles/book/negócios/rankings (consolidado de 17) + 3 de
     # notícias (consolidado de 9, ver docs/arquitetura/07-tools-consolidation.md); Trading: 6;
     # Fase 2: 5 tools de streaming via Socket Crystal/cache.
-    assert len([n for n in names if n.startswith("md_")]) == 14
+    assert len([n for n in names if n.startswith("md_")]) == 16
     assert len([n for n in names if n.startswith("news_")]) == 3
-    assert len([n for n in names if n.startswith("trading_")]) == 7
+    assert len([n for n in names if n.startswith("trading_")]) == 9
     assert len([n for n in names if n.startswith("stream_")]) == 5
 
 

@@ -8,6 +8,7 @@ from pydantic import Field
 
 from ..auth.entitlements import require_scope
 from ..auth.scopes import MARKETDATA_READ
+from ..analytics import CandleSummary, summarize_candles
 from ..errors import CedroValidationError
 from ..models import Candle
 from ._helpers import READ_ONLY_ANNOTATIONS, parse_list
@@ -40,11 +41,15 @@ def register(mcp: "FastMCP", client: "CedroClient") -> None:
         count: CandleCount | None = None,
         start: DateStr | None = None,
         end: DateStr | None = None,
-    ) -> list[Candle]:
+        summary: bool = False,
+    ) -> list[Candle] | CandleSummary:
         """Candles (OHLC) de um ativo — últimos N ou entre duas datas.
 
         mode="last" (default): últimos `count` candles. mode="range": candles entre `start` e
         `end` (yyyyMMddHHmm). period: 1/3/5 (min), D, 1W, 1M, 1Y.
+        summary=True devolve só o agregado (abertura, fechamento, máxima, mínima, variação,
+        volume) em vez da lista — use para períodos longos. Para tendência/risco, prefira
+        md_get_indicators.
         GET /services/quotes/candleLast/{symbol}/{period}/{count}
         GET /services/quotes/candleDate/{symbol}/{period}/{start}/{end}
         """
@@ -60,4 +65,5 @@ def register(mcp: "FastMCP", client: "CedroClient") -> None:
             )
         else:
             raise CedroValidationError(f"mode inválido: {mode!r} (use 'last' ou 'range').")
-        return parse_list(data, Candle)
+        candles = parse_list(data, Candle)
+        return summarize_candles(candles, period) if summary else candles

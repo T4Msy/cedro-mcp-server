@@ -1,0 +1,22 @@
+# Scrape do Cedro Connect IA. O /metrics exige o mesmo valor de MCP_METRICS_TOKEN do servidor —
+# guarde-o num arquivo (nunca no git) e aponte `credentials_file` para ele.
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: cedro-mcp
+    scheme: https
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/cedro-mcp-metrics-token
+    static_configs:
+      # Troque pelo host público (túnel/domínio). Com várias réplicas, liste cada uma — cada
+      # processo expõe as próprias séries.
+      - targets: ["SEU-HOST-PUBLICO"]
+        labels:
+          service: cedro-connect-ia

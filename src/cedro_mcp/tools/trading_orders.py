@@ -293,8 +293,8 @@ def register_order_tools(
 
         ⚠️ Mesmo depois de confirmado, um retorno de sucesso do OMS NÃO garante que a edição foi
         aplicada — é assíncrono. Depois de trading_confirm, reconsulte com
-        trading_list_orders_today e compare qty/price, ou avise o usuário que a confirmação real
-        ainda está pendente. stop_limit: obrigatório mesmo se a ordem não é stop — mande 0 (é o
+        trading_wait_order_status com expect_price/expect_qty, ou avise o usuário que a
+        confirmação real ainda está pendente. stop_limit: obrigatório mesmo se a ordem não é stop — mande 0 (é o
         default se omitido).
         """
         username, source_address = _trading_identity()
@@ -374,7 +374,12 @@ def register_order_tools(
             result["note"] = (
                 "code de sucesso aqui confirma só que o OMS RECEBEU o pedido de edição, não "
                 "que foi aplicado — a rejeição real é assíncrona. Chame "
-                "trading_list_orders_today e compare qty/price antes de dizer ao usuário que "
-                "a edição está feita."
+                "trading_wait_order_status com expect_price/expect_qty antes de dizer ao "
+                "usuário que a edição está feita."
+            )
+        elif response.accepted:
+            result["note"] = (
+                "O OMS recebeu o pedido. Para saber se executou, foi rejeitado ou segue aberto, "
+                "chame trading_wait_order_status com o clordid."
             )
         return result

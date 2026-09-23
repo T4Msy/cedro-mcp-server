@@ -18,11 +18,12 @@ from ._principal import as_principal
 from ._tools import tool_functions
 from .conftest import BASE_URL
 
-MARKET_TOOLS = 14
+MARKET_TOOLS = 16  # inclui md_get_indicators e md_compare_assets
 NEWS_TOOLS = 3
-#: 3 leitura (trading_list_orders_today, trading_get_order_history, trading_get_day_summary) + 4 escrita
+#: 5 leitura (list_orders_today, get_order_history, get_day_summary, get_audit,
+#: wait_order_status) + 4 escrita
 #: (preview_order, preview_cancel_order, preview_edit_order, confirm).
-TRADING_TOOLS = 7
+TRADING_TOOLS = 9
 STREAM_TOOLS = 5
 #: account_get_usage — visível para qualquer escopo (consulta a própria cota).
 ACCOUNT_TOOLS = 1

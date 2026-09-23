@@ -1,6 +1,6 @@
-"""Ponto de entrada do MCP server Cedro **Market Data** (1 MCP por produto).
+"""Ponto de entrada do **Cedro Connect IA** — o MCP server das APIs da Cedro.
 
-Entry point for the Cedro Market Data MCP server. Transporte padrão: **Streamable HTTP**
+Entry point for the Cedro Connect IA MCP server (Market Data REST, streaming e Trading). Transporte padrão: **Streamable HTTP**
 (cliente só precisa de URL + token). ``stdio`` continua disponível para desenvolvimento local.
 """
 
@@ -33,7 +33,7 @@ from cedro_mcp.credentials import (
     ServiceAccountCredentialProvider,
     WebLoginCredentialProvider,
 )
-from cedro_mcp.observability import configure_logging
+from cedro_mcp.observability import configure_audit, configure_logging
 from cedro_mcp.quota import QuotaPolicy
 from cedro_mcp.store import Store, build_secret_box, build_store
 from cedro_mcp.streaming import MarketDataStreamClient
@@ -43,8 +43,12 @@ from cedro_mcp.trading.client import TradingClient
 from cedro_mcp.trading.confirmation import ConfirmationStore
 from cedro_mcp.web_login import CedroLoginProvider
 
+#: Nome anunciado aos clientes MCP no handshake (``serverInfo.name``). Os clientes identificam o
+#: servidor pela URL, não por este nome — trocá-lo não quebra conexões existentes.
+SERVER_NAME = "cedro-connect-ia"
+
 _INSTRUCTIONS = (
-    "Tools das APIs da Cedro: Market Data REST (cotações, candles, book, negócios, rankings e "
+    "Cedro Connect IA — tools das APIs da Cedro: Market Data REST (cotações, candles, book, negócios, rankings e "
     "notícias) e streaming são somente leitura. Trading envia ordens REAIS: toda escrita passa "
     "por trading_preview_* e só executa com trading_confirm depois de o usuário confirmar "
     "explicitamente o resumo nesta conversa. As tools visíveis dependem do seu contrato/plano. "
@@ -134,6 +138,7 @@ def build_server(
     store = store or build_store(settings)
     box = build_secret_box(settings, store)
     quota = QuotaPolicy(settings, store)
+    configure_audit(store)
 
     login_provider: CedroLoginProvider | None = None
     credential_provider: CredentialProvider
@@ -201,7 +206,7 @@ def build_server(
             required_scopes=[MARKETDATA_READ],
         )
 
-    mcp = EntitledFastMCP("cedro-market-data", quota=quota, **kwargs)
+    mcp = EntitledFastMCP(SERVER_NAME, quota=quota, **kwargs)
 
     tools.register_all(mcp, client, stream_client)
     tools_trading.register(
