@@ -13,11 +13,14 @@ Três etapas, nesta ordem exata (ver AUTENTICACAO.md da skill trading):
 
 from __future__ import annotations
 
+import threading
+
 import httpx
 
 from ..config import Settings
 from ..credentials import TradingCredentials
 from ..errors import CedroAuthError
+from ..metrics import SIGNINS
 from .identity import build_identity, encode_identity
 
 
@@ -34,6 +37,9 @@ class TradingSessionAuth:
         self._remote_ip = remote_ip
         self._authenticated = False
         self._identifier_header: str | None = None
+        #: Mesmo esquema de `sessions.SessionAuth`: login serializado + geração por login.
+        self._generation = 0
+        self._lock = threading.Lock()
 
     @property
     def authenticated(self) -> bool:
@@ -41,7 +47,14 @@ class TradingSessionAuth:
 
     def reset(self) -> None:
         """Marca a sessão como inválida — força SignIn + brokerServiceLogin de novo."""
-        self._authenticated = False
+        with self._lock:
+            self._authenticated = False
+
+    def invalidate(self, generation: int) -> None:
+        """Invalida só se a sessão ainda é a da ``generation`` informada."""
+        with self._lock:
+            if generation == self._generation:
+                self._authenticated = False
 
     def identifier_header(self) -> dict[str, str]:
         """O header `user-identifier` pronto — só existe depois de `ensure()`."""
@@ -49,9 +62,25 @@ class TradingSessionAuth:
             raise CedroAuthError("Sessão de Trading ainda não autenticada.")
         return {"user-identifier": self._identifier_header}
 
-    def ensure(self, client: httpx.Client) -> None:
+    def ensure(self, client: httpx.Client) -> int:
+        """Garante sessão de negociação pronta (thread-safe). Devolve a geração do login."""
+        with self._lock:
+            if self._authenticated and "JSESSIONID" in client.cookies:
+                return self._generation
+            try:
+                generation = self._ensure_locked(client)
+            except CedroAuthError:
+                SIGNINS.labels("trading", "refused").inc()
+                raise
+            except httpx.HTTPError:
+                SIGNINS.labels("trading", "error").inc()
+                raise
+            SIGNINS.labels("trading", "ok").inc()
+            return generation
+
+    def _ensure_locked(self, client: httpx.Client) -> int:
         if self._authenticated and "JSESSIONID" in client.cookies:
-            return
+            return self._generation
         if not self._credentials.is_complete:
             raise CedroAuthError(
                 "Credenciais de Trading ausentes — faça login com uma credencial OMS "
@@ -127,3 +156,5 @@ class TradingSessionAuth:
             raise CedroAuthError(f"brokerServiceLogin recusado: {message}{hint}")
 
         self._authenticated = True
+        self._generation += 1
+        return self._generation

@@ -7,7 +7,7 @@ a instrução do servidor ainda dizem "cedro-market-data" — o rename pra "Cedr
 última etapa do roadmap (`docs/arquitetura/08-plano-por-fases.md`, Fase 4), não afeta
 funcionalidade.
 
-> **Status:** construído e testado com **mocks/fixtures** (145 testes). Market Data REST está em
+> **Status:** construído e testado com **mocks/fixtures** (203 testes). Market Data REST está em
 > produção pessoal (deploy real, ver `docs/arquitetura/09-deploy-hostinger-cloudflare.md`).
 > Trading tem cobertura de teste completa mas **nunca rodou contra a API real** — ver
 > `docs/arquitetura/10-trading-auth.md` antes de usar `trading_confirm` com dinheiro de verdade.
@@ -26,7 +26,9 @@ funcionalidade.
 | Auth do chamador | **IAM da Cedro** (Identity Server, JWT) **ou API key** (automação) |
 | Autorização | **Entitlements por escopo**: o cliente só *vê* e só *executa* as tools do plano contratado |
 | Credencial downstream | `CredentialProvider` **plugável** — decidido: credencial do **próprio cliente**, enviada por requisição (`PerUserCredentialProvider`); `ServiceAccountCredentialProvider` fica só para dev local |
-| Rate limit | Middleware ASGI por token |
+| Rate limit | Middleware ASGI por token (+ teto por IP) — global entre réplicas com Redis |
+| Estado | `store.py`: memória por padrão, **Redis** com `MCP_REDIS_URL` (rate limit, confirmações, login, cota) |
+| Operação | `/health` e `/healthz`, `/metrics` (Prometheus, com token), cota mensal por plano |
 
 > ⚠️ **Transporte:** a reunião decidiu "HTTP via SSE". Implementamos **Streamable HTTP** porque o SSE
 > é o transporte **legado** do spec MCP — atende os mesmos requisitos (URL + token, sem instalar nada,
@@ -78,11 +80,11 @@ As tools exigem `marketdata:stream` e uma credencial **Socket Crystal** (separad
 `CEDRO_CRYSTAL_USER` e `CEDRO_CRYSTAL_PASSWORD`. O processo mantém uma conexão por credencial,
 usa `MDC 1` antes de `SQT`, e aplica backoff mínimo de 3 segundos no failover.
 
-### Trading (6 — leitura + ação real com confirmação)
+### Trading (7 — leitura + ação real com confirmação)
 
 | Grupo | Tools |
 |---|---|
-| Consulta (leitura) | `trading_list_orders_today`, `trading_get_order_history` |
+| Consulta (leitura) | `trading_list_orders_today`, `trading_get_order_history`, `trading_get_day_summary` (comprado/vendido, preço médio e ordens abertas por ativo, calculado das ordens de hoje) |
 | Ação real — **preview → confirm** | `trading_preview_order` (8 tipos, incl. condicionais nativas Start/Stop/StopConditional/StopMoving/StopOCO/StopSimult), `trading_preview_cancel_order`, `trading_preview_edit_order`, `trading_confirm` |
 
 Toda tool de escrita monta e valida a ordem sem enviar nada (`trading_preview_*`), devolve um
@@ -90,6 +92,30 @@ resumo + `confirmation_token`, e só executa depois de `trading_confirm(token)` 
 sozinha a partir de um evento. Token de uso único, expira em ~2 min. Credencial de Trading é
 **separada** da Market Data (seção opcional no formulário `/cedro-login`, ou
 `CEDRO_TRADING_USER`/`CEDRO_TRADING_PASS` em dev). Ver `docs/arquitetura/10-trading-auth.md`.
+
+**Guardrails do preview** (`trading/guardrails.py`), conferidos contra o último negócio da Market
+Data antes de o token existir:
+
+| Variável | Efeito |
+|---|---|
+| `CEDRO_TRADING_MAX_ORDER_VALUE` (default `0` = off) | **Recusa** o preview se qty × preço passar do teto. Sem preço e sem cotação de referência, também recusa. Não aplica multiplicador de contrato (em futuros erra para o lado seguro) |
+| `CEDRO_TRADING_PRICE_BAND_PCT` (default `10`) | **Alerta** (`warnings` no preview) quando um preço da ordem está mais que X% longe do último negócio — pega erro de digitação como 38,50 → 385,0 |
+
+O preview devolve `reference_price`, `estimated_value` e `warnings` (saída tipada).
+
+> **Posição, custódia e saldo não existem na API de Trading** (são do Backoffice/Risk). Por isso
+> não há `trading_get_positions`; `trading_get_day_summary` cobre o que dá para calcular com
+> segurança — só o executado hoje.
+
+### Prompts e referência
+
+| Tipo | Nome | O que faz |
+|---|---|---|
+| Prompt | `analise_de_ativo(symbol)` | Cotação, 30 candles diários, livro e notícias, sem recomendação |
+| Prompt | `revisar_ordens_do_dia(account, market)` | Resumo do dia + detalhe das ordens abertas/rejeitadas |
+| Prompt | `preparar_ordem(pedido)` | Pedido em linguagem natural → preview com alertas → confirmação explícita |
+| Tool | `account_get_usage` | Uso da cota mensal do plano (usado, restante, renovação) — não consome cota |
+| Resource | `cedro-ref://trading` | Tipos de ordem e campos obrigatórios, validade e status — gerado das mesmas tabelas que validam as ordens |
 
 ## Instalação
 
@@ -138,17 +164,19 @@ Na seção Trading, informe separadamente o login/senha do `SignIn` e a conta, l
 identidade OMS (`user-identifier`). No modo de serviço, isso corresponde a `CEDRO_USER`/`CEDRO_PASS`
 e `CEDRO_OMS_ACCOUNT`/`CEDRO_OMS_LOGIN`/`CEDRO_OMS_PASSWORD`.
 
-> ⚠️ A credencial fica em **memória do processo** enquanto o token for válido (30 dias, sem
-> refresh — expira, reloga pela aba). Nunca em disco, nunca persistida — mas é mais exposição do
-> que o header por requisição puro. Reiniciar o processo desloga todo mundo.
+> ⚠️ A credencial fica **guardada no servidor** enquanto o token for válido (30 dias, sem refresh —
+> expira, reloga pela aba). Sem Redis, em memória do processo: reiniciar desloga todo mundo. Com
+> Redis, sobrevive a restart e vale em todas as réplicas, **sempre cifrada** (`MCP_STORE_SECRET`,
+> obrigatório nesse modo); nenhuma chave do Redis é o token cru. É mais exposição do que o header
+> por requisição puro.
 
 ## ⚠️ Notas de produção
 
 1. **Anti-DNS-rebinding:** o FastMCP só liga essa proteção sozinho quando o host é
    `127.0.0.1`/`localhost`. Servindo em `0.0.0.0` atrás de um LB ela fica **desligada** — preencha
    `MCP_ALLOWED_HOSTS` (ex.: `mcp.cedrotech.com:*`).
-2. **Rate limit em memória, por processo.** Com N réplicas, o limite efetivo é `N × MCP_RATE_LIMIT`.
-   Para limite global, trocar por um backend compartilhado (Redis).
+2. **Rate limit:** em memória é por processo (N réplicas ⇒ `N × MCP_RATE_LIMIT`); com
+   `MCP_REDIS_URL` é global. Tentativas barradas também contam na janela.
 3. **Credencial downstream:** decidido — credencial **do próprio cliente** (o `md_xxxx` que ele já
    contratou), enviada por requisição. Consequências obrigatórias: sessão `JSESSIONID` cacheada por
    **hash** da credencial (nunca a credencial em si), store compartilhado entre réplicas, limitador
@@ -157,11 +185,34 @@ e `CEDRO_OMS_ACCOUNT`/`CEDRO_OMS_LOGIN`/`CEDRO_OMS_PASSWORD`.
 4. **Streaming:** o cache/conector é local ao processo. Execute exatamente **uma réplica por
    credencial Socket**; múltiplas réplicas fariam logins paralelos, podendo derrubar ou bloquear a
    conta. Configure somente os hosts Crystal documentados e use `datafeed2` apenas como failover.
+5. **Concorrência:** as tools síncronas rodam em worker threads (`observability.instrument_tool`),
+   fora do event loop — uma chamada lenta à Cedro não trava as outras requisições. As sessões
+   REST/Trading ficam num pool thread-safe (`session_pool.py`): chave guardada só como hash, um
+   `SignIn` por principal mesmo com chamadas simultâneas, expiração por ociosidade (12 h) e teto
+   LRU de 1000 sessões por processo.
+6. **Logs e auditoria** (`MCP_LOG_LEVEL`, default `INFO`): `cedro_mcp.tools` registra cada chamada
+   (tool, principal, resultado, duração — nunca argumentos); `cedro_mcp.audit` registra
+   `trading_preview`, `trading_confirm`, `trading_confirm_result`, `trading_confirm_failed` e
+   `trading_confirm_rejected`. O principal aparece como `client_id#hash`, nunca o token. Em
+   produção, envie `cedro_mcp.audit` para um destino persistente — é a trilha de "quem mandou esta
+   ordem".
+7. **Token de confirmação de Trading** fica amarrado à sessão de quem fez o preview: apresentado
+   por outro chamador, é rejeitado e descartado.
+
+## Infra: estado compartilhado, healthcheck, métricas e cota
+
+| Item | Como funciona |
+|---|---|
+| **Redis** (`MCP_REDIS_URL` + `MCP_STORE_SECRET`) | Rate limit, tokens de confirmação, clientes/flows/códigos/tokens do login pelo navegador e contadores de cota. Restart não desloga ninguém; preview e confirm, `/authorize` e `/cedro-login` podem cair em réplicas diferentes. Credenciais cifradas (Fernet); chaves são hash, nunca o token. Sem Redis, tudo continua em memória como antes |
+| **Fica local ao processo, de propósito** | As sessões downstream (`JSESSIONID`/`httpx.Client`) e o conector Socket são conexões vivas: cada réplica faz o próprio `SignIn` e o reaproveita por até 12 h. Com N réplicas, até N logins por conta a cada 12 h — acompanhe em `cedro_mcp_signin_total`. Streaming continua exigindo **uma réplica por credencial Socket** |
+| **Healthcheck** `/health` e `/healthz` | `200 {"status":"ok","store":"memory"\|"redis"}`; `503 degraded` se o Redis configurado não responde. Sem auth e fora do rate limit. O `Dockerfile` tem `HEALTHCHECK` e a `render.yaml` já aponta para `/health` |
+| **Métricas** `/metrics` (`MCP_METRICS_TOKEN`) | Prometheus, com `Authorization: Bearer <token>`; sem token configurado a rota não existe. `cedro_mcp_tool_calls_total{tool,outcome,error_type}`, `cedro_mcp_tool_duration_seconds{tool}`, `cedro_mcp_upstream_requests_total{api,endpoint,status}`, `cedro_mcp_upstream_duration_seconds{api,endpoint}`, `cedro_mcp_signin_total{api,outcome}`, `cedro_mcp_rate_limited_total{bucket}`, `cedro_mcp_quota_exceeded_total{plan}`. `endpoint` é o path cortado em 3 segmentos (nunca símbolo/conta). Uma série por réplica |
+| **Cota por plano** (`MCP_PLAN_QUOTAS`, `MCP_DEFAULT_PLAN`) | Ex.: `basico:20000,pro:100000,enterprise:500000` chamadas de **tool** por mês (UTC, zera dia 1º), por identidade (`subject`, senão `client_id`). Plano = escopo `plan:<nome>` do token (IAM ou API key: `k_abc:robo:marketdata:read\|plan:pro`); sem ele, `MCP_DEFAULT_PLAN`; sem default, sem cota. Estourou → a tool falha com a data de renovação e nem chega à Cedro. `account_get_usage` mostra uso/restante e não consome cota. Global entre réplicas só com Redis |
 
 ## Testes
 
 ```powershell
-pytest          # 145 testes: auth, entitlements, REST, Trading, Socket Crystal/cache e login — mockados
+pytest          # 203 testes: auth, entitlements, REST, Trading, Socket Crystal/cache e login — mockados
 ruff check .
 python scripts/smoke_live.py     # smoke REST real; pula sozinho sem credenciais
 ```
@@ -174,7 +225,7 @@ pauta da Cedro, não do MCP — ver Gap Analysis em `docs/arquitetura/`:
 
 - IAM: URL de produção, validação por **JWKS** ou **introspection**, nomes reais dos `roles`/`claims`.
 - API key: o IAM emite/gerencia, ou criamos o store?
-- Cota por plano (20k/100k/500k req/mês): não é aplicada em lugar nenhum hoje — sem dono.
+- Cota por plano: **implementada** (`quota.py`), falta a Cedro confirmar os números e como o IAM vai carregar o plano no token (hoje: escopo `plan:<nome>`).
 - Credencial Crystal de homologação para executar o gate TCP real; os hosts/porta já estão documentados.
 
 ## Próximas fases

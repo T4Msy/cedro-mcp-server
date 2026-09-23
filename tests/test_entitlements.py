@@ -15,14 +15,17 @@ from cedro_mcp.errors import CedroEntitlementError
 from cedro_mcp.server import build_server
 
 from ._principal import as_principal
+from ._tools import tool_functions
 from .conftest import BASE_URL
 
 MARKET_TOOLS = 14
 NEWS_TOOLS = 3
-#: 2 leitura (trading_list_orders_today, trading_get_order_history) + 4 escrita
+#: 3 leitura (trading_list_orders_today, trading_get_order_history, trading_get_day_summary) + 4 escrita
 #: (preview_order, preview_cancel_order, preview_edit_order, confirm).
-TRADING_TOOLS = 6
+TRADING_TOOLS = 7
 STREAM_TOOLS = 5
+#: account_get_usage — visível para qualquer escopo (consulta a própria cota).
+ACCOUNT_TOOLS = 1
 
 
 def _tool_names(mcp) -> set[str]:
@@ -30,7 +33,7 @@ def _tool_names(mcp) -> set[str]:
 
 
 def _fns(mcp) -> dict:
-    return {t.name: t.fn for t in mcp._tool_manager.list_tools()}  # noqa: SLF001
+    return tool_functions(mcp._tool_manager.list_tools())  # noqa: SLF001
 
 
 # ---- listagem filtrada -----------------------------------------------------
@@ -40,7 +43,7 @@ def test_read_only_token_hides_news_tools(settings: Settings, client: CedroClien
     mcp = build_server(settings=settings, client=client)
     with as_principal(MARKETDATA_READ):
         names = _tool_names(mcp)
-    assert len(names) == MARKET_TOOLS
+    assert len(names) == MARKET_TOOLS + ACCOUNT_TOOLS
     assert not any(n.startswith("news_") for n in names)
 
 
@@ -48,7 +51,7 @@ def test_full_token_lists_all_tools(settings: Settings, client: CedroClient) -> 
     mcp = build_server(settings=settings, client=client)
     with as_principal(MARKETDATA_READ, MARKETDATA_NEWS):
         names = _tool_names(mcp)
-    assert len(names) == MARKET_TOOLS + NEWS_TOOLS
+    assert len(names) == MARKET_TOOLS + NEWS_TOOLS + ACCOUNT_TOOLS
     assert len([n for n in names if n.startswith("news_")]) == NEWS_TOOLS
 
 
@@ -56,14 +59,16 @@ def test_stream_scope_lists_only_streaming_tools(settings: Settings, client: Ced
     mcp = build_server(settings=settings, client=client)
     with as_principal(MARKETDATA_STREAM):
         names = _tool_names(mcp)
-    assert len(names) == STREAM_TOOLS
-    assert all(name.startswith("stream_") for name in names)
+    assert len(names) == STREAM_TOOLS + ACCOUNT_TOOLS
+    assert all(name.startswith(("stream_", "account_")) for name in names)
 
 
 def test_no_auth_context_lists_everything(settings: Settings, client: CedroClient) -> None:
     """Sem autenticação ativa (stdio/dev), nada é filtrado."""
     mcp = build_server(settings=settings, client=client)
-    assert len(_tool_names(mcp)) == MARKET_TOOLS + NEWS_TOOLS + TRADING_TOOLS + STREAM_TOOLS
+    assert len(_tool_names(mcp)) == (
+        MARKET_TOOLS + NEWS_TOOLS + TRADING_TOOLS + STREAM_TOOLS + ACCOUNT_TOOLS
+    )
 
 
 # ---- execução negada -------------------------------------------------------

@@ -9,21 +9,29 @@ mostramos nosso próprio formulário (`/cedro-login`), validamos a credencial co
 /SignIn` de verdade, e só então emitimos um token de acesso opaco associado a ela.
 
 **O que isto é e o que não é** (ver docs/arquitetura/06-credential-transport.md, Alternativa C):
-a credencial do cliente nunca é exposta ao MCP client, só o token — mas ela FICA em memória do
-processo, associada ao token, enquanto ele for válido. É estado em memória, nunca persistido em
-disco, nunca uma base de senhas real; reinicia o processo, todo mundo reloga. Ainda assim é mais
-exposição do que a Alternativa A (header por requisição, sem custódia nenhuma) — trade-off aceito
-aqui deliberadamente, a pedido explícito do usuário, para ganhar a UX de "clicar e autenticar".
+a credencial do cliente nunca é exposta ao MCP client, só o token — mas ela FICA guardada no
+servidor, associada ao token, enquanto ele for válido. Mais exposição do que a Alternativa A
+(header por requisição, sem custódia nenhuma) — trade-off aceito aqui deliberadamente, a pedido
+explícito do usuário, para ganhar a UX de "clicar e autenticar".
+
+**Onde fica o estado** (clientes OAuth, flows, códigos, tokens e credenciais): no ``Store``
+(``store.py``). Em memória por padrão — reinicia o processo, todo mundo reloga. Com Redis
+(``MCP_REDIS_URL``) sobrevive a restart e é visto por todas as réplicas (o ``/authorize`` pode cair
+numa e o ``POST /cedro-login`` em outra). No store as credenciais vão **cifradas**
+(``MCP_STORE_SECRET``) e nenhuma chave é o token cru; o próprio token também não é gravado no
+registro de acesso — só o hash dele, como chave.
 """
 
 from __future__ import annotations
 
 import html
+import json
 import secrets
 import time
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING, Any
 
+import anyio.to_thread
 import httpx
 from mcp.server.auth.provider import (
     AccessToken,
@@ -42,6 +50,9 @@ from starlette.routing import Route
 
 from .credentials import CedroCredentialBundle, RestCredentials, SocketCredentials, TradingCredentials
 from .errors import CedroAuthError
+from .metrics import SIGNINS
+from .session_pool import hash_key
+from .store import MemoryStore, PlainBox, SecretBox, Store, call
 from .trading.auth import TradingSessionAuth
 
 if TYPE_CHECKING:
@@ -54,13 +65,40 @@ _FLOW_TTL = 600.0
 _CODE_TTL = 300.0
 #: Sem refresh token nesta v1 (ver módulo) — expira, o cliente reabre a aba e refaz o login.
 _ACCESS_TOKEN_TTL = 60 * 60 * 24 * 30  # 30 dias
+#: Cliente registrado por DCR — longo: o token emitido para ele vale 30 dias.
+_CLIENT_TTL = 60 * 60 * 24 * 400
+
+_CLIENT_KEY = "oauth:client:"
+_FLOW_KEY = "oauth:flow:"
+_CODE_KEY = "oauth:code:"
+_CODE_CREDS_KEY = "oauth:code-creds:"
+_TOKEN_KEY = "oauth:token:"
+_CREDS_KEY = "oauth:creds:"
 
 
 @dataclass
 class _PendingFlow:
     client: OAuthClientInformationFull
     params: AuthorizationParams
-    created_at: float = field(default_factory=time.monotonic)
+
+
+def _bundle_to_bytes(bundle: CedroCredentialBundle) -> bytes:
+    return json.dumps(
+        {
+            "rest": asdict(bundle.rest) if bundle.rest else None,
+            "socket": asdict(bundle.socket) if bundle.socket else None,
+            "trading": asdict(bundle.trading) if bundle.trading else None,
+        }
+    ).encode()
+
+
+def _bundle_from_bytes(raw: bytes) -> CedroCredentialBundle:
+    data: dict[str, Any] = json.loads(raw)
+    return CedroCredentialBundle(
+        rest=RestCredentials(**data["rest"]) if data.get("rest") else None,
+        socket=SocketCredentials(**data["socket"]) if data.get("socket") else None,
+        trading=TradingCredentials(**data["trading"]) if data.get("trading") else None,
+    )
 
 
 async def _verify_rest_credentials(settings: "Settings", creds: RestCredentials) -> None:
@@ -71,19 +109,24 @@ async def _verify_rest_credentials(settings: "Settings", creds: RestCredentials)
     de verificação.
     """
     async with httpx.AsyncClient(base_url=settings.base_url, timeout=settings.http_timeout) as http:
-        resp = await http.post(
-            "/SignIn", params={"login": creds.user, "password": creds.password}
-        )
+        try:
+            resp = await http.post(
+                "/SignIn", params={"login": creds.user, "password": creds.password}
+            )
+        except httpx.HTTPError:
+            SIGNINS.labels("market_data", "error").inc()
+            raise
     body = (resp.text or "").strip().strip('"').lower()
     if resp.status_code != 200 or body == "false" or "JSESSIONID" not in resp.cookies:
+        SIGNINS.labels("market_data", "refused").inc()
         raise TokenError("access_denied", "Login ou senha da Market Data inválidos.")
+    SIGNINS.labels("market_data", "ok").inc()
 
 
 def _verify_trading_credentials(settings: "Settings", creds: TradingCredentials) -> None:
     """``SignIn`` + ``brokerServiceLogin`` reais (as 3 camadas de auth) — só pra validar, a
     sessão é descartada em seguida. Síncrono (``TradingSessionAuth.ensure`` usa ``httpx.Client``,
-    não Async) — chamado direto do handler async; aceitável no volume desta rota (login pessoal,
-    não um endpoint de alto tráfego).
+    não Async) — o handler async chama numa worker thread.
     """
     http = httpx.Client(base_url=settings.trading_base_url_value, timeout=settings.http_timeout)
     try:
@@ -96,61 +139,138 @@ def _verify_trading_credentials(settings: "Settings", creds: TradingCredentials)
 
 
 class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken]):
-    """Ver docstring do módulo. Todo o estado é em memória, por processo."""
+    """Ver docstring do módulo. Todo o estado vive no ``Store`` (memória ou Redis)."""
 
-    def __init__(self, settings: "Settings") -> None:
+    def __init__(
+        self,
+        settings: "Settings",
+        *,
+        store: Store | None = None,
+        box: SecretBox | PlainBox | None = None,
+    ) -> None:
         self._settings = settings
-        self._clients: dict[str, OAuthClientInformationFull] = {}
-        self._flows: dict[str, _PendingFlow] = {}
-        self._auth_codes: dict[str, AuthorizationCode] = {}
-        #: token de autorização → bundle com as credenciais dos produtos escolhidos no formulário.
-        self._pending_credentials: dict[str, CedroCredentialBundle] = {}
-        self._access_tokens: dict[str, AccessToken] = {}
-        #: Único estado que o resto do servidor lê (`credentials.py`) — token → bundle.
-        self.credentials_by_token: dict[str, CedroCredentialBundle] = {}
+        self._store = store or MemoryStore()
+        if box is None and not self._store.is_local:
+            raise ValueError("Store compartilhado exige um SecretBox para as credenciais.")
+        self._box = box or PlainBox()
+
+    # ---- acesso ao store (síncrono; o código async chama via store.call) --------------
+
+    def _put(self, key: str, value: bytes, ttl: float) -> None:
+        self._store.set(key, value, ttl=ttl)
+
+    def _put_bundle(self, key: str, bundle: CedroCredentialBundle, ttl: float) -> None:
+        self._store.set(key, self._box.seal(_bundle_to_bytes(bundle)), ttl=ttl)
+
+    def _open_bundle(self, raw: bytes | None) -> CedroCredentialBundle | None:
+        if raw is None:
+            return None
+        data = self._box.open(raw)
+        # Cifrado com outro MCP_STORE_SECRET (segredo trocado): trata como sessão inexistente.
+        return _bundle_from_bytes(data) if data is not None else None
+
+    def _load_flow(self, flow_id: str) -> _PendingFlow | None:
+        raw = self._store.get(_FLOW_KEY + hash_key(flow_id))
+        return self._decode_flow(raw)
+
+    def _pop_flow(self, flow_id: str) -> _PendingFlow | None:
+        """Consome o flow — dois POSTs do mesmo formulário não geram dois códigos."""
+        return self._decode_flow(self._store.pop(_FLOW_KEY + hash_key(flow_id)))
+
+    @staticmethod
+    def _decode_flow(raw: bytes | None) -> _PendingFlow | None:
+        if raw is None:
+            return None
+        data = json.loads(raw)
+        return _PendingFlow(
+            client=OAuthClientInformationFull.model_validate(data["client"]),
+            params=AuthorizationParams.model_validate(data["params"]),
+        )
+
+    def _pending_bundle(self, code: str) -> CedroCredentialBundle | None:
+        """Credenciais do código ainda não trocado (sem consumir) — usado nos testes."""
+        return self._open_bundle(self._store.get(_CODE_CREDS_KEY + hash_key(code)))
+
+    def credentials_for_token(self, token: str) -> CedroCredentialBundle | None:
+        """Único ponto que o resto do servidor lê (`credentials.py`) — token → bundle."""
+        return self._open_bundle(self._store.get(_CREDS_KEY + hash_key(token)))
+
+    def _load_access_token(self, token: str) -> AccessToken | None:
+        raw = self._store.get(_TOKEN_KEY + hash_key(token))
+        if raw is None:
+            return None
+        # O token em si não é gravado (a chave é o hash dele) — volta a partir do que o
+        # chamador apresentou.
+        return AccessToken(token=token, **json.loads(raw))
+
+    def _forget_token(self, token: str) -> None:
+        self._store.delete(_TOKEN_KEY + hash_key(token))
+        self._store.delete(_CREDS_KEY + hash_key(token))
 
     # ---- Dynamic Client Registration (RFC 7591) — o MCP client se registra sozinho ----
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        return self._clients.get(client_id)
+        raw = await call(self._store, self._store.get, _CLIENT_KEY + client_id)
+        return OAuthClientInformationFull.model_validate_json(raw) if raw else None
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
-        self._clients[client_info.client_id] = client_info
+        await call(
+            self._store,
+            self._put,
+            _CLIENT_KEY + client_info.client_id,
+            client_info.model_dump_json().encode(),
+            _CLIENT_TTL,
+        )
 
     # ---- authorize(): em vez de redirecionar pra outro provedor, mostra NOSSA página -----
 
     async def authorize(
         self, client: OAuthClientInformationFull, params: AuthorizationParams
     ) -> str:
-        self._gc_flows()
         flow_id = secrets.token_urlsafe(24)
-        self._flows[flow_id] = _PendingFlow(client=client, params=params)
+        payload = json.dumps(
+            {"client": client.model_dump(mode="json"), "params": params.model_dump(mode="json")}
+        ).encode()
+        await call(self._store, self._put, _FLOW_KEY + hash_key(flow_id), payload, _FLOW_TTL)
         return f"/cedro-login?flow_id={flow_id}"
 
     async def load_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: str
     ) -> AuthorizationCode | None:
-        code = self._auth_codes.get(authorization_code)
-        if code is None or code.expires_at < time.time() or code.client_id != client.client_id:
+        raw = await call(self._store, self._store.get, _CODE_KEY + hash_key(authorization_code))
+        if raw is None:
+            return None
+        code = AuthorizationCode.model_validate_json(raw)
+        if code.expires_at < time.time() or code.client_id != client.client_id:
             return None
         return code
 
     async def exchange_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: AuthorizationCode
     ) -> OAuthToken:
-        bundle = self._pending_credentials.pop(authorization_code.code, None)
-        self._auth_codes.pop(authorization_code.code, None)
+        code_hash = hash_key(authorization_code.code)
+        raw_bundle = await call(self._store, self._store.pop, _CODE_CREDS_KEY + code_hash)
+        await call(self._store, self._store.delete, _CODE_KEY + code_hash)
+        bundle = self._open_bundle(raw_bundle)
         if bundle is None:
             raise TokenError("invalid_grant", "Código de autorização inválido, expirado ou já usado.")
         token = secrets.token_urlsafe(32)
-        self.credentials_by_token[token] = bundle
         subject = (bundle.rest or bundle.socket or bundle.trading)
-        self._access_tokens[token] = AccessToken(
+        access = AccessToken(
             token=token,
             client_id=authorization_code.client_id,
             scopes=authorization_code.scopes,
             expires_at=int(time.time()) + _ACCESS_TOKEN_TTL,
             subject=subject.user if subject else None,
+        )
+        await call(self._store, self._put_bundle, _CREDS_KEY + hash_key(token), bundle,
+                   _ACCESS_TOKEN_TTL)
+        await call(
+            self._store,
+            self._put,
+            _TOKEN_KEY + hash_key(token),
+            access.model_dump_json(exclude={"token"}).encode(),
+            _ACCESS_TOKEN_TTL,
         )
         return OAuthToken(
             access_token=token,
@@ -178,27 +298,16 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         )
 
     async def load_access_token(self, token: str) -> AccessToken | None:
-        entry = self._access_tokens.get(token)
+        entry = await call(self._store, self._load_access_token, token)
         if entry is None:
             return None
         if entry.expires_at is not None and entry.expires_at < time.time():
-            self._forget_token(token)
+            await call(self._store, self._forget_token, token)
             return None
         return entry
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
-        self._forget_token(token.token)
-
-    def _forget_token(self, token: str) -> None:
-        self._access_tokens.pop(token, None)
-        self.credentials_by_token.pop(token, None)
-
-    def _gc_flows(self) -> None:
-        """Descarta flows abertos que o usuário nunca terminou (aba fechada, etc.)."""
-        now = time.monotonic()
-        stale = [fid for fid, flow in self._flows.items() if now - flow.created_at > _FLOW_TTL]
-        for fid in stale:
-            self._flows.pop(fid, None)
+        await call(self._store, self._forget_token, token.token)
 
     # ---- Nossa página de login, montada como rotas Starlette extras -----------------
 
@@ -211,7 +320,7 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
     async def _handle_login_page(self, request: Request) -> HTMLResponse:
         flow_id = request.query_params.get("flow_id", "")
         error = request.query_params.get("error")
-        if flow_id not in self._flows:
+        if await call(self._store, self._load_flow, flow_id) is None:
             return HTMLResponse(_render_expired_page(), status_code=400)
         return HTMLResponse(_render_login_page(flow_id, error))
 
@@ -247,8 +356,7 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
             trading_oms_login = legacy_trading_login
             trading_oms_password = legacy_trading_password
 
-        flow = self._flows.get(flow_id)
-        if flow is None:
+        if await call(self._store, self._load_flow, flow_id) is None:
             return HTMLResponse(_render_expired_page(), status_code=400)
 
         if bool(login) != bool(password):
@@ -337,7 +445,9 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
                 oms_password=trading_oms_password or None,
             )
             try:
-                _verify_trading_credentials(self._settings, trading_creds)
+                await anyio.to_thread.run_sync(
+                    _verify_trading_credentials, self._settings, trading_creds
+                )
             except TokenError as exc:
                 # Mostra o motivo real (SignIn recusado / brokerServiceLogin + code / etc.) em
                 # vez de um genérico — é exatamente o diagnóstico que TradingSessionAuth.ensure()
@@ -356,9 +466,13 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
                     status_code=303,
                 )
 
-        del self._flows[flow_id]
+        # Consome o flow só aqui, depois de validar: erro no formulário deixa a pessoa tentar de
+        # novo; dois POSTs simultâneos do mesmo flow não geram dois códigos.
+        flow = await call(self._store, self._pop_flow, flow_id)
+        if flow is None:
+            return HTMLResponse(_render_expired_page(), status_code=400)
         code = secrets.token_urlsafe(32)
-        self._auth_codes[code] = AuthorizationCode(
+        auth_code = AuthorizationCode(
             code=code,
             scopes=flow.params.scopes or [],
             expires_at=time.time() + _CODE_TTL,
@@ -369,10 +483,15 @@ class CedroLoginProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
             resource=flow.params.resource,
             subject=(rest_creds or socket_creds or trading_creds).user,
         )
-        self._pending_credentials[code] = CedroCredentialBundle(
-            rest=rest_creds,
-            socket=socket_creds,
-            trading=trading_creds,
+        bundle = CedroCredentialBundle(rest=rest_creds, socket=socket_creds, trading=trading_creds)
+        code_hash = hash_key(code)
+        await call(self._store, self._put_bundle, _CODE_CREDS_KEY + code_hash, bundle, _CODE_TTL)
+        await call(
+            self._store,
+            self._put,
+            _CODE_KEY + code_hash,
+            auth_code.model_dump_json().encode(),
+            _CODE_TTL,
         )
         redirect_url = construct_redirect_uri(
             str(flow.params.redirect_uri), code=code, state=flow.params.state

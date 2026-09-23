@@ -18,6 +18,8 @@ from mcp.server.auth.provider import AccessToken
 from .config import Settings
 from .credentials import CredentialProvider, ServiceAccountCredentialProvider
 from .errors import CedroAuthError, CedroHTTPError
+from .metrics import instrumented_client
+from .session_pool import SessionPool
 from .sessions import NewsAuth, SessionAuth
 
 # Erros HTTP documentados para os endpoints REST (ver [[REST - MOC]] e nota `quote`).
@@ -52,7 +54,7 @@ class _Session:
 
 
 class SessionRegistry:
-    """Mantém uma sessão ``JSESSIONID`` por chave de principal.
+    """Mantém uma sessão ``JSESSIONID`` por chave de principal (thread-safe, com expiração).
 
     Se um ``httpx.Client`` for injetado (testes/dev), ele é **compartilhado** por todas as chaves —
     o isolamento real de cookies só existe quando o registry cria os clientes.
@@ -67,25 +69,26 @@ class SessionRegistry:
         self._settings = settings
         self._provider = credential_provider
         self._shared_http = http
-        self._sessions: dict[str, _Session] = {}
+        self._pool: SessionPool[_Session] = SessionPool(close=self._close_session)
 
     def for_principal(self, principal: AccessToken | None) -> _Session:
         key = self._provider.session_key(principal)
-        session = self._sessions.get(key)
-        if session is None:
+
+        def create() -> _Session:
             credentials = self._provider.rest_credentials_for(principal)
-            http = self._shared_http or httpx.Client(
-                base_url=self._settings.base_url, timeout=self._settings.http_timeout
+            http = self._shared_http or instrumented_client(
+                "market_data", base_url=self._settings.base_url, timeout=self._settings.http_timeout
             )
-            session = _Session(http=http, auth=SessionAuth(credentials))
-            self._sessions[key] = session
-        return session
+            return _Session(http=http, auth=SessionAuth(credentials))
+
+        return self._pool.get_or_create(key, create)
+
+    def _close_session(self, session: _Session) -> None:
+        if session.http is not self._shared_http:
+            session.http.close()
 
     def close(self) -> None:
-        for session in self._sessions.values():
-            if session.http is not self._shared_http:
-                session.http.close()
-        self._sessions.clear()
+        self._pool.close_all()
         if self._shared_http is not None:
             self._shared_http.close()
 
@@ -106,8 +109,8 @@ class CedroClient:
             http=http,
         )
         # Notícias usam client_credentials (não é credencial de usuário) → um token compartilhado.
-        self._news_http = http or httpx.Client(
-            base_url=settings.base_url, timeout=settings.http_timeout
+        self._news_http = http or instrumented_client(
+            "news", base_url=settings.base_url, timeout=settings.http_timeout
         )
         self._news_owned = http is None
         self._news = NewsAuth(settings)
@@ -133,11 +136,12 @@ class CedroClient:
     def get_quotes(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         """GET num endpoint de cotações, garantindo sessão e reautenticando 1x em 401."""
         session = self._registry.for_principal(self._principal())
-        session.auth.ensure(session.http)
+        generation = session.auth.ensure(session.http)
         resp = session.http.get(path, params=params)
         if resp.status_code == 401:
-            # Sessão pode ter expirado: reautentica uma vez e tenta de novo.
-            session.auth.reset()
+            # Sessão pode ter expirado: reautentica uma vez e tenta de novo. `invalidate` só
+            # derruba a sessão que ESTA chamada usou — se outra thread já relogou, reaproveita.
+            session.auth.invalidate(generation)
             session.auth.ensure(session.http)
             resp = session.http.get(path, params=params)
         return self._handle(resp)
@@ -149,7 +153,7 @@ class CedroClient:
         headers = self._news.ensure_header(self._news_http)
         resp = self._news_http.get(path, params=params, headers=headers)
         if resp.status_code == 401:
-            self._news.reset()
+            self._news.invalidate(headers)
             headers = self._news.ensure_header(self._news_http)
             resp = self._news_http.get(path, params=params, headers=headers)
         return self._handle(resp)

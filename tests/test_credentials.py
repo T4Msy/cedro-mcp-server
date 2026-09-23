@@ -25,9 +25,12 @@ def _token(value: str = "tok") -> AccessToken:
 
 @dataclass
 class _FakeLoginProvider:
-    """Só o que WebLoginCredentialProvider precisa: o dict token→bundle."""
+    """Só o que WebLoginCredentialProvider precisa: resolver token→bundle."""
 
     credentials_by_token: dict[str, CedroCredentialBundle] = field(default_factory=dict)
+
+    def credentials_for_token(self, token: str) -> CedroCredentialBundle | None:
+        return self.credentials_by_token.get(token)
 
 
 def test_bundle_defaults_to_no_product() -> None:

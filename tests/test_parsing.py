@@ -16,6 +16,7 @@ from cedro_mcp.config import Settings
 from cedro_mcp.errors import CedroHTTPError
 from cedro_mcp.server import build_server
 
+from ._tools import tool_functions
 from .conftest import BASE_URL, load_fixture
 
 _SIGNIN_OK = httpx.Response(
@@ -28,7 +29,7 @@ def tool_fns(settings: Settings, client: CedroClient) -> dict:
     """Mapa nome→função das tools reais registradas no servidor."""
     mcp = build_server(settings=settings, client=client)
     tools = mcp._tool_manager.list_tools()  # noqa: SLF001 (uso interno, estável p/ teste)
-    return {t.name: t.fn for t in tools}
+    return tool_functions(tools)
 
 
 @respx.mock

@@ -225,7 +225,7 @@ class WebLoginCredentialProvider:
     def _bundle_for(self, principal: AccessToken | None) -> CedroCredentialBundle:
         if principal is None:
             raise CedroAuthError("Não autenticado — faça login em /cedro-login primeiro.")
-        bundle = self._login_provider.credentials_by_token.get(principal.token)
+        bundle = self._login_provider.credentials_for_token(principal.token)
         if bundle is None:
             raise CedroAuthError(
                 "Sessão de login não encontrada ou expirada — refaça o login pelo navegador."

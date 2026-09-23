@@ -24,6 +24,10 @@ class CedroEntitlementError(CedroError):
     """
 
 
+class CedroQuotaError(CedroError):
+    """Cota mensal do plano esgotada — a chamada nem chega à API da Cedro."""
+
+
 class CedroHTTPError(CedroError):
     """Resposta HTTP de erro (404/405/408/504/…)."""
 

@@ -13,12 +13,14 @@ from typing import TYPE_CHECKING
 
 from ..auth.entitlements import require_scope
 from ..auth.scopes import TRADING_READ
+from ..trading.day_summary import DaySummary, summarize_day
 from ._helpers import READ_ONLY_ANNOTATIONS
 from .trading_orders import register_order_tools
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
+    from ..client import CedroClient
     from ..config import Settings
     from ..credentials import CredentialProvider
     from ..trading.client import TradingClient
@@ -31,9 +33,12 @@ def register(
     confirmation_store: "ConfirmationStore",
     credential_provider: "CredentialProvider",
     settings: "Settings",
+    market_data: "CedroClient",
 ) -> None:
     _register_read_tools(mcp, trading_client)
-    register_order_tools(mcp, trading_client, confirmation_store, credential_provider, settings)
+    register_order_tools(
+        mcp, trading_client, confirmation_store, credential_provider, settings, market_data
+    )
 
 
 def _register_read_tools(mcp: "FastMCP", client: "TradingClient") -> None:
@@ -87,3 +92,19 @@ def _register_read_tools(mcp: "FastMCP", client: "TradingClient") -> None:
         if status:
             params["status"] = status
         return client.history_orders(path, params=params)
+
+    @mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
+    @require_scope(TRADING_READ)
+    def trading_get_day_summary(account: str, market: str) -> DaySummary:
+        """Resumo do dia por ativo: quanto foi comprado/vendido HOJE, preço médio de cada lado,
+        saldo líquido do dia e ordens em aberto — calculado das ordens do dailyOrder.
+
+        NÃO é custódia nem posição consolidada: a API de Trading não expõe posição, saldo nem
+        custódia (outro produto). Deixe isso claro ao usuário se ele perguntar "quanto eu tenho".
+
+        Day summary per symbol computed from today's orders — not a custody/position report.
+        market: XBSP (Bovespa) ou XBMF (BM&F).
+        GET /services/negotiation/dailyOrder/{conta}/{mercado}
+        """
+        payload = client.daily_orders(f"/services/negotiation/dailyOrder/{account}/{market}")
+        return summarize_day(payload, account=account, market=market)

@@ -77,7 +77,7 @@ def test_rest_only_login_leaves_trading_out_of_the_bundle(settings: Settings) ->
 
     response = asyncio.run(run())
     code = response.headers["location"].split("code=")[1].split("&")[0]
-    bundle = provider._pending_credentials[code]  # noqa: SLF001
+    bundle = provider._pending_bundle(code)  # noqa: SLF001
     assert bundle.rest is not None
     assert bundle.trading is None
 
@@ -106,7 +106,7 @@ def test_both_products_verified_and_bundled(settings: Settings) -> None:
     response = asyncio.run(run())
     assert response.status_code == 302
     code = response.headers["location"].split("code=")[1].split("&")[0]
-    bundle = provider._pending_credentials[code]  # noqa: SLF001
+    bundle = provider._pending_bundle(code)  # noqa: SLF001
     assert bundle.rest is not None
     assert bundle.trading is not None
     assert bundle.trading.user == "10034"
@@ -164,7 +164,7 @@ def test_trading_accepts_separate_signin_and_oms_credentials(settings: Settings)
     assert identity["password"] == "oms-pass"
 
     code = response.headers["location"].split("code=")[1].split("&")[0]
-    bundle = provider._pending_credentials[code]  # noqa: SLF001
+    bundle = provider._pending_bundle(code)  # noqa: SLF001
     assert bundle.trading is not None
     assert bundle.trading.user == "signin-user"
     assert bundle.trading.oms_account == "146751"
@@ -188,7 +188,7 @@ def test_half_filled_trading_fields_is_rejected_before_any_http_call(settings: S
     assert response.status_code == 303
     assert "Trading" in response.headers["location"]
     # o flow continua pendente — o usuário pode tentar de novo com o formulário certo.
-    assert flow_id in provider._flows  # noqa: SLF001
+    assert provider._load_flow(flow_id) is not None  # noqa: SLF001
 
 
 def test_invalid_trading_credentials_rejected_with_clear_error(settings: Settings) -> None:
@@ -216,4 +216,4 @@ def test_invalid_trading_credentials_rejected_with_clear_error(settings: Setting
     assert response.status_code == 303
     assert "Trading" in response.headers["location"]
     # REST já validou, mas Trading falhou — o flow segue vivo pra tentar de novo.
-    assert flow_id in provider._flows  # noqa: SLF001
+    assert provider._load_flow(flow_id) is not None  # noqa: SLF001

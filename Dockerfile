@@ -10,7 +10,7 @@ FROM python:3.11-slim AS builder
 WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir --prefix=/install .
+RUN pip install --no-cache-dir --prefix=/install ".[redis]"
 
 FROM python:3.11-slim AS runtime
 
@@ -34,5 +34,10 @@ ENV MCP_TRANSPORT=streamable-http \
 USER cedro
 
 EXPOSE 8000
+
+# /health responde 200 {"status":"ok"} (503 se o Redis configurado estiver fora). Sem curl na
+# imagem slim — usa o próprio Python.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"MCP_PORT\", \"8000\")}/health', timeout=4)" || exit 1
 
 ENTRYPOINT ["cedro-mcp"]

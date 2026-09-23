@@ -11,6 +11,7 @@ from cedro_mcp.client import CedroClient
 from cedro_mcp.config import Settings
 from cedro_mcp.http_app import RateLimitMiddleware, create_app
 from cedro_mcp.server import build_server
+from cedro_mcp.store import MemoryStore
 
 
 class _OkApp:
@@ -71,12 +72,11 @@ def test_rate_limit_disabled_passes_everything_through() -> None:
     assert inner.calls == 5
 
 
-def test_rate_limit_window_expires(monkeypatch) -> None:  # noqa: ANN001
-    import cedro_mcp.http_app as mod
-
+def test_rate_limit_window_expires() -> None:
     now = [1000.0]
-    monkeypatch.setattr(mod.time, "monotonic", lambda: now[0])
-    app = RateLimitMiddleware(_OkApp(), limit=1, window=10)
+    app = RateLimitMiddleware(
+        _OkApp(), limit=1, window=10, store=MemoryStore(clock=lambda: now[0])
+    )
     auth = [(b"authorization", b"Bearer t")]
 
     assert _request(app, auth) == 200
@@ -85,29 +85,22 @@ def test_rate_limit_window_expires(monkeypatch) -> None:  # noqa: ANN001
     assert _request(app, auth) == 200
 
 
-def test_rate_limit_evicts_empty_buckets_after_window(monkeypatch) -> None:  # noqa: ANN001
-    """Buckets vazios não devem sobreviver pra sempre no dict (vazamento de memória)."""
-    import cedro_mcp.http_app as mod
-
+def test_rate_limit_evicts_empty_buckets_after_window() -> None:
+    """Buckets vazios não devem sobreviver pra sempre (vazamento de memória)."""
     now = [1000.0]
-    monkeypatch.setattr(mod.time, "monotonic", lambda: now[0])
-    app = RateLimitMiddleware(_OkApp(), limit=1, window=10)
-    auth = [(b"authorization", b"Bearer t")]
+    store = MemoryStore(clock=lambda: now[0])
+    app = RateLimitMiddleware(_OkApp(), limit=1, window=10, store=store)
 
-    assert _request(app, auth) == 200
-    assert len(app._hits) == 1
-    now[0] += 11  # janela passou, bucket deveria esvaziar e ser removido
-    assert _request(app, auth) == 200
-    # Depois do request seguinte, só o bucket "fresco" (1 hit) deve existir — nunca cresce.
-    assert len(app._hits) == 1
+    assert _request(app, [(b"authorization", b"Bearer a")]) == 200
+    assert store.window_keys() == 2  # bucket do token + bucket do IP
+    now[0] += 11  # janela passou: o bucket do token "a" morreu
+    assert _request(app, [(b"authorization", b"Bearer b")]) == 200
+    # Só os buckets vivos (token "b" + IP) — o de "a" foi varrido, o dict nunca cresce.
+    assert store.window_keys() == 2
 
 
-def test_rate_limit_bypass_by_rotating_tokens_is_capped_by_ip(monkeypatch) -> None:  # noqa: ANN001
+def test_rate_limit_bypass_by_rotating_tokens_is_capped_by_ip() -> None:
     """Trocar de bearer a cada request furaria o limite por-token — o teto por IP pega isso."""
-    import cedro_mcp.http_app as mod
-
-    now = [2000.0]
-    monkeypatch.setattr(mod.time, "monotonic", lambda: now[0])
     app = RateLimitMiddleware(_OkApp(), limit=1, window=60)  # teto por IP = 1 * 5 = 5
 
     for i in range(5):
@@ -238,7 +231,7 @@ def test_readonly_key_sees_only_market_tools_over_http(
     settings: Settings, client: CedroClient
 ) -> None:
     names = _list_tools_over_http(_auth_settings(settings), client, "k_read")
-    assert len(names) == 14
+    assert len(names) == 15  # 14 de market data + account_get_usage
     assert not any(n.startswith("news_") for n in names)
 
 
@@ -248,5 +241,5 @@ def test_full_key_sees_all_tools_over_http(settings: Settings, client: CedroClie
         api_keys_raw="k_full:robo:marketdata:read|marketdata:news",
     )
     names = _list_tools_over_http(settings, client, "k_full")
-    assert len(names) == 17
+    assert len(names) == 18  # + 3 de notícias
     assert len([n for n in names if n.startswith("news_")]) == 3

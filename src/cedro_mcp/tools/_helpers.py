@@ -12,8 +12,8 @@ from pydantic import BaseModel
 
 M = TypeVar("M", bound=BaseModel)
 
-#: Todas as 26 tools deste servidor são GETs de leitura pura contra a API Market Data — nenhuma
-#: executa ação/escrita. Sem isto, `@mcp.tool()` usa os defaults do SDK, que mostram no Inspector
+#: Tools de leitura pura (Market Data REST, streaming, consultas e previews de Trading) — nenhuma
+#: executa ação/escrita; só `trading_confirm` usa `TRADE_ANNOTATIONS`. Sem isto, `@mcp.tool()` usa os defaults do SDK, que mostram no Inspector
 #: valores errados pra este caso (ex.: "Destructive: Yes", "Idempotent: No").
 READ_ONLY_ANNOTATIONS = ToolAnnotations(
     readOnlyHint=True,

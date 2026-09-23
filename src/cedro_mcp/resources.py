@@ -16,6 +16,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .trading.models import (
+    OPEN_ORDER_STATES,
+    ORD_TYPE_BY_MODE,
+    ORDER_STATUSES,
+    REQUIRED_FIELDS_BY_MODE,
+    TIME_IN_FORCE_DESCRIPTIONS,
+)
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
@@ -46,6 +54,45 @@ def build_note_map(root: Path) -> dict[str, Path]:
     return mapping
 
 
+def render_trading_reference() -> str:
+    """Markdown gerado das tabelas de `trading/models.py` — a mesma fonte que valida as ordens."""
+    lines = [
+        "# Referência de Trading (Cedro)",
+        "",
+        "Toda ordem passa por `trading_preview_order` → confirmação explícita do usuário → "
+        "`trading_confirm`.",
+        "",
+        "## Tipos de ordem (`mode`)",
+        "",
+        "| mode | type (OMS) | Campos obrigatórios além dos comuns |",
+        "|---|---|---|",
+    ]
+    for mode, required in REQUIRED_FIELDS_BY_MODE.items():
+        fields = ", ".join(f"`{f}`" for f in required) or "—"
+        lines.append(f"| `{mode}` | `{ORD_TYPE_BY_MODE[mode]}` | {fields} |")
+    lines += [
+        "",
+        "Comuns a todos: `market` (XBSP/XBMF), `symbol`, `side` (BUY/SELL), `qty`, `account`. "
+        "`mode=market` não leva `clordid` — cuidado redobrado com reenvio.",
+        "",
+        "## Validade (`time_in_force`)",
+        "",
+    ]
+    lines += [f"- `{code}` — {desc}" for code, desc in TIME_IN_FORCE_DESCRIPTIONS.items()]
+    lines += ["", "## Status de ordem (`state`)", ""]
+    for code, desc in ORDER_STATUSES.items():
+        suffix = " *(em aberto)*" if code in OPEN_ORDER_STATES else ""
+        lines.append(f"- `{code}` — {desc}{suffix}")
+    lines += [
+        "",
+        "## O que esta API não tem",
+        "",
+        "Posição, custódia, saldo e limite de risco não existem na API de Trading (são do "
+        "Backoffice/Risk). `trading_get_day_summary` mostra só o executado HOJE.",
+    ]
+    return "\n".join(lines)
+
+
 def register(mcp: "FastMCP", settings: "Settings") -> None:
     docs_root = settings.docs_path
 
@@ -64,6 +111,15 @@ def register(mcp: "FastMCP", settings: "Settings") -> None:
             rel = path.relative_to(docs_root).as_posix()
             lines.append(f"- {rel}\n  → cedro-docs://note/{token}")
         return "\n".join(lines)
+
+    @mcp.resource("cedro-ref://trading", mime_type="text/markdown")
+    def trading_reference() -> str:
+        """Referência de Trading: tipos de ordem e campos obrigatórios, validade e status.
+
+        Trading reference generated from the server's own validation tables — always in sync
+        with what trading_preview_order accepts.
+        """
+        return render_trading_reference()
 
     @mcp.resource("cedro-docs://note/{token}")
     def docs_note(token: str) -> str:

@@ -63,7 +63,7 @@ def test_tool_count_matches_blueprint_scope(settings: Settings, client: CedroCli
     # Fase 2: 5 tools de streaming via Socket Crystal/cache.
     assert len([n for n in names if n.startswith("md_")]) == 14
     assert len([n for n in names if n.startswith("news_")]) == 3
-    assert len([n for n in names if n.startswith("trading_")]) == 6
+    assert len([n for n in names if n.startswith("trading_")]) == 7
     assert len([n for n in names if n.startswith("stream_")]) == 5
 
 

@@ -17,6 +17,8 @@ from mcp.server.auth.provider import AccessToken
 from ..config import Settings
 from ..credentials import CredentialProvider
 from ..errors import CedroAuthError, CedroHTTPError
+from ..metrics import instrumented_client
+from ..session_pool import SessionPool
 from .auth import TradingSessionAuth
 from .models import OrderResponse
 
@@ -59,31 +61,34 @@ class TradingSessionRegistry:
         self._settings = settings
         self._provider = credential_provider
         self._shared_http = http
-        self._sessions: dict[str, _TradingSession] = {}
+        self._pool: SessionPool[_TradingSession] = SessionPool(close=self._close_session)
 
     def for_principal(self, principal: AccessToken | None) -> _TradingSession:
         key = self._provider.session_key(principal)
-        session = self._sessions.get(key)
-        if session is None:
+
+        def create() -> _TradingSession:
             credentials = self._provider.trading_credentials_for(principal)
             # trading_base_url_value, NUNCA base_url direto: uma credencial de certificação
             # contra produção (ou vice-versa) dá 401 vazio no brokerServiceLogin, sem nenhum dos
             # padrões documentados (code 3/24) — achado real, ver config.py:trading_base_url.
-            http = self._shared_http or httpx.Client(
-                base_url=self._settings.trading_base_url_value, timeout=self._settings.http_timeout
+            http = self._shared_http or instrumented_client(
+                "trading",
+                base_url=self._settings.trading_base_url_value,
+                timeout=self._settings.http_timeout,
             )
             auth = TradingSessionAuth(
                 self._settings, credentials, remote_ip=self._settings.trading_remote_ip
             )
-            session = _TradingSession(http=http, auth=auth)
-            self._sessions[key] = session
-        return session
+            return _TradingSession(http=http, auth=auth)
+
+        return self._pool.get_or_create(key, create)
+
+    def _close_session(self, session: _TradingSession) -> None:
+        if session.http is not self._shared_http:
+            session.http.close()
 
     def close(self) -> None:
-        for session in self._sessions.values():
-            if session.http is not self._shared_http:
-                session.http.close()
-        self._sessions.clear()
+        self._pool.close_all()
         if self._shared_http is not None:
             self._shared_http.close()
 
@@ -112,11 +117,11 @@ class TradingClient:
         self, method: str, path: str, *, params: dict[str, Any], is_order_send: bool
     ) -> dict[str, Any]:
         session = self._registry.for_principal(self._principal())
-        session.auth.ensure(session.http)
+        generation = session.auth.ensure(session.http)
         headers = session.auth.identifier_header()
         resp = session.http.request(method, path, params=params, headers=headers)
         if resp.status_code == 401:
-            session.auth.reset()
+            session.auth.invalidate(generation)
             session.auth.ensure(session.http)
             headers = session.auth.identifier_header()
             resp = session.http.request(method, path, params=params, headers=headers)

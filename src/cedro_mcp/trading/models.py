@@ -63,6 +63,41 @@ REQUIRED_FIELDS_BY_MODE: dict[str, tuple[str, ...]] = {
 #: Só o Mercado não aceita clordid pela spec (regra 4 da skill) — cuidado redobrado com reenvio.
 MODES_WITHOUT_CLORDID = frozenset({"market"})
 
+#: Status de ordem do dailyOrder/historyOrder (campo `state`) — ver ENUMS.md da skill.
+ORDER_STATUSES: dict[str, str] = {
+    "New": "Nova (recebida)",
+    "PartiallyFilled": "Parcialmente executada",
+    "Filled": "Completamente executada",
+    "DoneForDay": "Encerrada para o dia",
+    "Canceled": "Cancelada",
+    "Replaced": "Editada/substituída",
+    "PendingCancel": "Cancelamento pendente",
+    "Rejected": "Rejeitada",
+    "Suspend": "Suspensa",
+    "PendingNew": "Pendente de confirmação",
+    "Expired": "Expirada",
+    "Received": "Recebida pelo sistema",
+    "PendingReplace": "Edição pendente",
+}
+
+#: Status em que a ordem ainda pode executar (inclusive PendingCancel: até o cancelamento ser
+#: confirmado, ela segue no book).
+OPEN_ORDER_STATES = frozenset(
+    {"New", "PartiallyFilled", "Replaced", "PendingCancel", "Suspend", "PendingNew", "Received",
+     "PendingReplace"}
+)
+
+TIME_IN_FORCE_DESCRIPTIONS: dict[str, str] = {
+    "DAY": "Válida no dia (default)",
+    "GTC": "Válida até cancelar",
+    "OPG": "Na abertura",
+    "IOC": "Executa o possível na hora e cancela o resto",
+    "FOK": "Executa tudo na hora ou cancela tudo",
+    "GTD": "Válida até a data (validity_order)",
+    "ATC": "No fechamento",
+    "GFA": "Válida para o leilão",
+}
+
 
 class _Base(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)

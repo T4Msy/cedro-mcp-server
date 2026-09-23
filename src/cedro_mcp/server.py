@@ -14,7 +14,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 # Imports absolutos (não relativos): o `mcp dev` carrega este arquivo pelo caminho,
 # fora do contexto de pacote, e imports relativos (`from .`) quebrariam. O pacote
 # está instalado (`pip install -e`), então o import absoluto resolve nos dois casos.
-from cedro_mcp import resources, tools
+from cedro_mcp import prompts, resources, tools
 from cedro_mcp.auth.api_key import EnvApiKeyStore
 from cedro_mcp.auth.entitlements import EntitledFastMCP
 from cedro_mcp.auth.scopes import (
@@ -33,17 +33,24 @@ from cedro_mcp.credentials import (
     ServiceAccountCredentialProvider,
     WebLoginCredentialProvider,
 )
+from cedro_mcp.observability import configure_logging
+from cedro_mcp.quota import QuotaPolicy
+from cedro_mcp.store import Store, build_secret_box, build_store
 from cedro_mcp.streaming import MarketDataStreamClient
+from cedro_mcp.tools import account
 from cedro_mcp.tools import trading as tools_trading
 from cedro_mcp.trading.client import TradingClient
 from cedro_mcp.trading.confirmation import ConfirmationStore
 from cedro_mcp.web_login import CedroLoginProvider
 
 _INSTRUCTIONS = (
-    "Tools de leitura (read-only) da API Market Data da Cedro: cotações, candles, book, "
-    "negócios, rankings e notícias. As tools visíveis dependem do seu contrato/plano. "
+    "Tools das APIs da Cedro: Market Data REST (cotações, candles, book, negócios, rankings e "
+    "notícias) e streaming são somente leitura. Trading envia ordens REAIS: toda escrita passa "
+    "por trading_preview_* e só executa com trading_confirm depois de o usuário confirmar "
+    "explicitamente o resumo nesta conversa. As tools visíveis dependem do seu contrato/plano. "
     "Consulte os contratos em cedro-docs://index. "
-    "Read-only Cedro Market Data tools; visibility depends on your plan."
+    "Cedro API tools: market data is read-only; trading places REAL orders only via "
+    "preview + explicit user confirmation. Visibility depends on your plan."
 )
 
 
@@ -83,6 +90,7 @@ def build_server(
     token_verifier: TokenVerifier | None = None,
     *,
     enforce_auth_guard: bool = True,
+    store: Store | None = None,
 ) -> FastMCP:
     """Monta o servidor FastMCP com tools, resources e (se configurado) autenticação.
 
@@ -93,7 +101,7 @@ def build_server(
     ``enforce_auth_guard`` (default True) recusa montar o servidor sem auth em qualquer
     transporte que não seja stdio, a menos que ``settings.allow_unauthenticated_http`` seja
     explicitamente True — sem essa guarda, uma env var faltando/errada em produção (streamable-
-    http) exporia as 26 tools sem autenticação nenhuma, sem nenhum aviso. Testes que montam um
+    http) exporia todas as tools sem autenticação nenhuma, sem nenhum aviso. Testes que montam um
     servidor stdio-like sem auth não são afetados; quem realmente precisa de um servidor HTTP
     sem auth (demo local) passa ``enforce_auth_guard=False`` ou seta
     ``MCP_ALLOW_UNAUTHENTICATED_HTTP=true``.
@@ -117,15 +125,20 @@ def build_server(
         ]
         raise ConfigurationError(
             "Auth do chamador desligada rodando em transporte "
-            f"'{settings.transport}' (faltam: {', '.join(missing)}) — isso exporia as 26 tools "
+            f"'{settings.transport}' (faltam: {', '.join(missing)}) — isso exporia todas as tools "
             "sem autenticação nenhuma. Defina as variáveis, ou explicitamente "
             "MCP_ALLOW_UNAUTHENTICATED_HTTP=true se isto for intencional (ex.: demo local)."
         )
 
+    # Estado compartilhável (rate limit, confirmações, login, cota): memória ou Redis.
+    store = store or build_store(settings)
+    box = build_secret_box(settings, store)
+    quota = QuotaPolicy(settings, store)
+
     login_provider: CedroLoginProvider | None = None
     credential_provider: CredentialProvider
     if settings.web_login_enabled:
-        login_provider = CedroLoginProvider(settings)
+        login_provider = CedroLoginProvider(settings, store=store, box=box)
         credential_provider = WebLoginCredentialProvider(login_provider)
     else:
         credential_provider = ServiceAccountCredentialProvider(settings)
@@ -133,7 +146,7 @@ def build_server(
     client = client or CedroClient(settings, credential_provider=credential_provider)
     stream_client = stream_client or MarketDataStreamClient(settings, credential_provider)
     trading_client = TradingClient(settings, credential_provider)
-    confirmation_store = ConfirmationStore()
+    confirmation_store = ConfirmationStore(store)
 
     kwargs: dict = {
         "instructions": _INSTRUCTIONS,
@@ -188,17 +201,24 @@ def build_server(
             required_scopes=[MARKETDATA_READ],
         )
 
-    mcp = EntitledFastMCP("cedro-market-data", **kwargs)
+    mcp = EntitledFastMCP("cedro-market-data", quota=quota, **kwargs)
 
     tools.register_all(mcp, client, stream_client)
-    tools_trading.register(mcp, trading_client, confirmation_store, credential_provider, settings)
+    tools_trading.register(
+        mcp, trading_client, confirmation_store, credential_provider, settings, client
+    )
     resources.register(mcp, settings)
+    prompts.register(mcp)
+    account.register(mcp, quota)
 
     if login_provider is not None:
         # Ponto de integração lido por http_app.create_app() pra montar /cedro-login no mesmo
         # app ASGI — não é um atributo do FastMCP em si, só carona pra não precisar mudar a
         # assinatura de build_server() em todo lugar que já a chama.
         mcp.cedro_login_provider = login_provider  # type: ignore[attr-defined]
+
+    # Lido por http_app.create_app(): rate limit e /health usam o mesmo store.
+    mcp.cedro_store = store  # type: ignore[attr-defined]
 
     # main() fecha esse registro no shutdown. A conexão só nasce quando uma tool stream_* for usada.
     mcp.cedro_stream_client = stream_client  # type: ignore[attr-defined]
@@ -209,6 +229,7 @@ def build_server(
 def main() -> None:
     """Executa o servidor no transporte configurado (padrão: streamable-http)."""
     settings = load_settings()
+    configure_logging(settings.log_level)
     mcp = build_server(settings)
 
     if settings.transport == "stdio":
@@ -222,7 +243,12 @@ def main() -> None:
 
     from cedro_mcp.http_app import create_app
 
-    app = create_app(mcp, rate_limit=settings.rate_limit, rate_window=settings.rate_window)
+    app = create_app(
+        mcp,
+        rate_limit=settings.rate_limit,
+        rate_window=settings.rate_window,
+        metrics_token=settings.metrics_token,
+    )
     try:
         uvicorn.run(app, host=settings.mcp_host, port=settings.mcp_port)
     finally:

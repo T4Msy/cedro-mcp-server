@@ -79,6 +79,12 @@ class Settings:
     #: vazio no brokerServiceLogin, sem nenhum dos padrões documentados (code 3/24) — é auth num
     #: host, requisição noutro. `None` = usa `base_url` (mesmo host da Market Data REST).
     trading_base_url: str | None = None
+    #: Guardrails do preview (ver trading/guardrails.py). Teto de valor (qty × preço) por ordem —
+    #: acima dele o preview é RECUSADO; 0 = sem teto.
+    trading_max_order_value: float = 0.0
+    #: Alerta (não recusa) quando um preço da ordem está mais que isto (%) longe do último
+    #: negócio; 0 = desligado.
+    trading_price_band_pct: float = 10.0
 
     # --- Auth do chamador (IAM / API key) ---
     iam_issuer: str | None = None
@@ -113,6 +119,28 @@ class Settings:
     # --- Rate limit (por token) ---
     rate_limit: int = 0  # 0 = desligado
     rate_window: float = 60.0
+
+    # --- Estado compartilhado (ver store.py) ---
+    #: Redis para rate limit, confirmações, login pelo navegador e cota — entre réplicas e
+    #: restarts. ``None`` = memória do processo (o comportamento de sempre).
+    redis_url: str | None = None
+    #: Segredo que cifra as credenciais do login pelo navegador no store. Obrigatório com Redis.
+    store_secret: str | None = None
+
+    # --- Métricas Prometheus (/metrics) ---
+    #: Bearer exigido em /metrics. ``None`` = endpoint desligado (404).
+    metrics_token: str | None = None
+
+    # --- Cota mensal por plano (ver quota.py) ---
+    #: plano → chamadas de tool por mês (UTC). Vazio = sem cota.
+    plan_quotas: tuple[tuple[str, int], ...] = ()
+    #: Plano de quem não tem escopo ``plan:<nome>`` no token. ``None`` = esses ficam sem cota.
+    default_plan: str | None = None
+
+    # --- Logs ---
+    #: Nível do root logger (``cedro_mcp.tools`` loga cada chamada em INFO, ``cedro_mcp.audit``
+    #: os eventos de Trading). Ver observability.py.
+    log_level: str = "INFO"
 
     @property
     def has_rest_credentials(self) -> bool:
@@ -178,6 +206,42 @@ def _normalize_trading_encryption(raw: str | None) -> str:
     return value
 
 
+def _parse_plan_quotas(raw: str | None) -> tuple[tuple[str, int], ...]:
+    """``basico:20000,pro:100000`` → ``(("basico", 20000), ("pro", 100000))``."""
+    quotas: list[tuple[str, int]] = []
+    for item in _csv(raw):
+        name, sep, limit = item.partition(":")
+        if not sep or not name.strip() or not limit.strip().isdigit():
+            raise ConfigurationError(
+                f"MCP_PLAN_QUOTAS inválido em {item!r}. Formato: plano:limite,plano:limite "
+                "(ex.: basico:20000,pro:100000,enterprise:500000)."
+            )
+        quotas.append((name.strip(), int(limit)))
+    return tuple(quotas)
+
+
+def _default_plan(env: dict[str, str]) -> str | None:
+    plan = (env.get("MCP_DEFAULT_PLAN") or "").strip() or None
+    known = {name for name, _ in _parse_plan_quotas(env.get("MCP_PLAN_QUOTAS"))}
+    if plan and plan not in known:
+        raise ConfigurationError(
+            f"MCP_DEFAULT_PLAN={plan!r} não existe em MCP_PLAN_QUOTAS ({sorted(known) or 'vazio'})."
+        )
+    return plan
+
+
+_SUPPORTED_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
+
+def _normalize_log_level(raw: str | None) -> str:
+    value = (raw or "INFO").strip().upper()
+    if value not in _SUPPORTED_LOG_LEVELS:
+        raise ConfigurationError(
+            f"MCP_LOG_LEVEL={value!r} não é suportado. Use um de {_SUPPORTED_LOG_LEVELS}."
+        )
+    return value
+
+
 def load_settings(environ: dict[str, str] | None = None) -> Settings:
     """Carrega Settings do ambiente (ou de um dict, para testes).
 
@@ -220,6 +284,8 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         trading_app_name=env.get("CEDRO_TRADING_APP_NAME") or "cedro-connect-ia",
         trading_remote_ip=env.get("CEDRO_TRADING_REMOTE_IP") or "0.0.0.0",
         trading_base_url=(env.get("CEDRO_TRADING_BASE_URL") or "").rstrip("/") or None,
+        trading_max_order_value=float(env.get("CEDRO_TRADING_MAX_ORDER_VALUE") or "0"),
+        trading_price_band_pct=float(env.get("CEDRO_TRADING_PRICE_BAND_PCT") or "10"),
         iam_issuer=env.get("CEDRO_IAM_ISSUER") or None,
         iam_jwks_url=env.get("CEDRO_IAM_JWKS_URL") or None,
         iam_audience=env.get("CEDRO_IAM_AUDIENCE") or None,
@@ -235,4 +301,10 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         allowed_origins=_csv(env.get("MCP_ALLOWED_ORIGINS")),
         rate_limit=int(env.get("MCP_RATE_LIMIT", "0")),
         rate_window=float(env.get("MCP_RATE_WINDOW", "60")),
+        log_level=_normalize_log_level(env.get("MCP_LOG_LEVEL")),
+        redis_url=env.get("MCP_REDIS_URL") or None,
+        store_secret=env.get("MCP_STORE_SECRET") or None,
+        metrics_token=env.get("MCP_METRICS_TOKEN") or None,
+        plan_quotas=_parse_plan_quotas(env.get("MCP_PLAN_QUOTAS")),
+        default_plan=_default_plan(env),
     )

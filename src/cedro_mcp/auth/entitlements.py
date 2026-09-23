@@ -14,13 +14,17 @@ deploy que ativa o IAM.
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.fastmcp import FastMCP
 from mcp.types import Tool as MCPTool
 
 from ..errors import CedroEntitlementError
+from ..observability import instrument_tool
+
+if TYPE_CHECKING:
+    from ..quota import QuotaPolicy
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -64,7 +68,20 @@ def require_scope(*scopes: str) -> Callable[[F], F]:
 
 
 class EntitledFastMCP(FastMCP):
-    """FastMCP que filtra a listagem de tools pelos escopos do token do chamador."""
+    """FastMCP que filtra a listagem de tools pelos escopos do token do chamador.
+
+    Também instrumenta toda tool registrada (ver :func:`~cedro_mcp.observability.instrument_tool`):
+    as síncronas passam a rodar numa worker thread, fora do event loop, e cada chamada é logada.
+    """
+
+    def __init__(self, *args: Any, quota: QuotaPolicy | None = None, **kwargs: Any) -> None:
+        #: Precisa existir antes do super().__init__: ele pode registrar tools.
+        self.quota = quota
+        super().__init__(*args, **kwargs)
+
+    def add_tool(self, fn: Callable[..., Any], name: str | None = None, **kwargs: Any) -> None:
+        wrapped = instrument_tool(fn, name or fn.__name__, getattr(self, "quota", None))
+        super().add_tool(wrapped, name=name, **kwargs)
 
     async def list_tools(self) -> list[MCPTool]:
         tools = await super().list_tools()

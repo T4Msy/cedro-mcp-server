@@ -69,9 +69,36 @@ services:
 3. Confirmar com `curl -s https://<url-do-tunel>/.well-known/oauth-authorization-server` — se
    voltar JSON com `scopes_supported`, subiu certo.
 
-⚠️ **Todo redeploy do `app` derruba a sessão de quem já tinha logado** (credenciais em memória,
-ver `06-credential-transport.md`) — o usuário precisa reconectar/reautenticar no cliente MCP
-depois. Evite redeployar sem necessidade real enquanto alguém estiver testando ativamente.
+⚠️ **Sem Redis, todo redeploy do `app` derruba a sessão de quem já tinha logado** (credenciais em
+memória, ver `06-credential-transport.md`) — o usuário precisa reconectar/reautenticar no cliente
+MCP depois.
+
+### Opcional: Redis para sobreviver a redeploy
+
+Acrescente ao projeto `cedro-mcp` (mesmo compose do `app`) e as variáveis abaixo. O login, os
+tokens de confirmação de Trading, o rate limit e a cota passam a viver no Redis; as credenciais vão
+cifradas com `MCP_STORE_SECRET` (gere uma vez e **mantenha a mesma** entre deploys — trocar desloga
+todo mundo).
+
+```yaml
+services:
+  app:
+    # ...o que já existe, mais:
+    environment:
+      MCP_REDIS_URL: "redis://redis:6379/0"
+      MCP_STORE_SECRET: "<python -c 'import secrets; print(secrets.token_urlsafe(48))'>"
+    depends_on: [redis]
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis-data:/data"]
+volumes:
+  redis-data:
+```
+
+Sem `ports:` no `redis` — fica só na rede interna do compose. Confira com
+`curl http://127.0.0.1:8000/health` → `{"status":"ok","store":"redis"}`.
 
 ## Ressalvas registradas (ver também `06-credential-transport.md`)
 

@@ -17,12 +17,22 @@ dependencies = [
     # RSA-OAEP-SHA256 do user-identifier de Trading (trading/identity.py). Já vinha transitivo
     # via pyjwt[crypto], mas dependência transitiva não é garantia de versão — explícita aqui.
     "cryptography>=42",
+    # TypedDict de saída das tools de Trading (NotRequired). Transitiva via pydantic, explícita
+    # aqui pelo mesmo motivo da cryptography acima.
+    "typing-extensions>=4.6",
+    # /metrics (metrics.py) — puro Python, sem dependências nativas.
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
+# Estado compartilhado entre réplicas (MCP_REDIS_URL — ver store.py). A imagem Docker já instala.
+redis = ["redis>=5"]
 dev = [
     "pytest>=8.0",
     "respx>=0.21",
+    "redis>=5",
+    # Redis em memória para os testes de store/login/cota/rate limit entre "réplicas".
+    "fakeredis>=2.20",
     # Pinado exato: 0.16 mudou o conjunto de regras padrão (RUF100/C408/ANN001 etc. passaram a
     # rodar) e quebrou CI sem nenhuma mudança de código — ruff ainda é pre-1.0, sem garantia de
     # compat entre minors.

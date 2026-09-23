@@ -10,10 +10,12 @@ import respx
 
 from cedro_mcp.client import CedroClient
 from cedro_mcp.config import Settings
-from cedro_mcp.errors import CedroEntitlementError
+from cedro_mcp.credentials import ServiceAccountCredentialProvider
+from cedro_mcp.errors import CedroEntitlementError, CedroError
 from cedro_mcp.server import build_server
 
 from ._principal import as_principal
+from ._tools import tool_functions
 from .conftest import BASE_URL
 
 _SIGNIN_OK = httpx.Response(200, text="true", headers={"Set-Cookie": "JSESSIONID=abc123; Path=/"})
@@ -26,7 +28,7 @@ def _trading_settings(settings: Settings) -> Settings:
 
 def _tool_fns(settings: Settings, client: CedroClient) -> dict:
     mcp = build_server(settings=settings, client=client)
-    return {t.name: t.fn for t in mcp._tool_manager.list_tools()}  # noqa: SLF001
+    return tool_functions(mcp._tool_manager.list_tools())  # noqa: SLF001
 
 
 @respx.mock
@@ -124,3 +126,61 @@ def test_write_tools_require_trading_trade_scope(settings: Settings, client: Ced
                 mode="market", market="XBSP", symbol="PETR4", side="BUY", qty=100,
                 account="10034",
             )
+
+
+@respx.mock
+def test_confirm_from_another_principal_is_rejected_and_audited(
+    settings: Settings,
+    client: CedroClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Token de confirmação vazado não executa a ordem com a sessão de outro chamador."""
+    # Service account tem uma chave só; aqui cada subject vira uma sessão, como no web login.
+    monkeypatch.setattr(
+        ServiceAccountCredentialProvider,
+        "session_key",
+        lambda self, principal: principal.subject if principal else "anon",
+    )
+    send_route = respx.post(f"{BASE_URL}/services/negotiation/sendNewOrderSingleMarket").mock(
+        return_value=httpx.Response(200, json={"code": "1"})
+    )
+    fns = _tool_fns(_trading_settings(settings), client)
+    with as_principal("marketdata:read", "trading:trade", subject="dono"):
+        preview = fns["trading_preview_order"](
+            mode="market", market="XBSP", symbol="PETR4", side="BUY", qty=100, account="10034"
+        )
+    caplog.set_level("INFO", logger="cedro_mcp.audit")
+    with as_principal("marketdata:read", "trading:trade", subject="intruso"):
+        with pytest.raises(CedroError, match="outra sessão"):
+            fns["trading_confirm"](preview["confirmation_token"])
+    assert send_route.call_count == 0
+    assert "trading_confirm_rejected" in caplog.text
+    assert preview["confirmation_token"] not in caplog.text
+
+
+@respx.mock
+def test_preview_and_confirm_are_audited_without_leaking_the_token(
+    settings: Settings, client: CedroClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    respx.post(f"{BASE_URL}/SignIn").mock(return_value=_SIGNIN_OK)
+    respx.get(f"{BASE_URL}/services/negotiation/brokerServiceLogin").mock(
+        return_value=_BROKER_LOGIN_OK
+    )
+    respx.post(f"{BASE_URL}/services/negotiation/sendNewOrderSingleMarket").mock(
+        return_value=httpx.Response(200, json={"code": "1", "message": "ok"})
+    )
+    caplog.set_level("INFO", logger="cedro_mcp.audit")
+    fns = _tool_fns(_trading_settings(settings), client)
+    preview = fns["trading_preview_order"](
+        mode="market", market="XBSP", symbol="PETR4", side="BUY", qty=100, account="10034"
+    )
+    fns["trading_confirm"](preview["confirmation_token"])
+    events = [r.getMessage().split()[0] for r in caplog.records]
+    assert events == [
+        "event=trading_preview",
+        "event=trading_confirm",
+        "event=trading_confirm_result",
+    ]
+    assert "PETR4" in caplog.text
+    assert preview["confirmation_token"] not in caplog.text
